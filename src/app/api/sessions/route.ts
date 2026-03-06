@@ -86,19 +86,21 @@ function getLocalClaudeSessions() {
     return rows.map((s) => {
       const total = (s.input_tokens || 0) + (s.output_tokens || 0)
       const lastMsg = s.last_message_at ? new Date(s.last_message_at).getTime() : 0
+      const isActive = s.is_active === 1
+      const effectiveLastActivity = isActive ? Date.now() : lastMsg
       return {
         id: s.session_id,
         key: s.project_slug || s.session_id,
         agent: s.project_slug || 'local',
         kind: 'claude-code',
-        age: formatAge(lastMsg),
+        age: isActive ? 'now' : formatAge(lastMsg),
         model: s.model || 'unknown',
         tokens: `${formatTokens(s.input_tokens || 0)}/${formatTokens(s.output_tokens || 0)}`,
         channel: 'local',
         flags: s.git_branch ? [s.git_branch] : [],
-        active: s.is_active === 1,
+        active: isActive,
         startTime: s.first_message_at ? new Date(s.first_message_at).getTime() : 0,
-        lastActivity: lastMsg,
+        lastActivity: effectiveLastActivity,
         source: 'local' as const,
         userMessages: s.user_messages || 0,
         assistantMessages: s.assistant_messages || 0,
@@ -122,19 +124,20 @@ function getLocalCodexSessions() {
       const total = s.totalTokens || (s.inputTokens + s.outputTokens)
       const lastMsg = s.lastMessageAt ? new Date(s.lastMessageAt).getTime() : 0
       const firstMsg = s.firstMessageAt ? new Date(s.firstMessageAt).getTime() : 0
+      const effectiveLastActivity = s.isActive ? Date.now() : lastMsg
       return {
         id: s.sessionId,
         key: s.projectSlug || s.sessionId,
         agent: s.projectSlug || 'codex-local',
         kind: 'codex-cli',
-        age: formatAge(lastMsg),
+        age: s.isActive ? 'now' : formatAge(lastMsg),
         model: s.model || 'codex',
         tokens: `${formatTokens(s.inputTokens || 0)}/${formatTokens(s.outputTokens || 0)}`,
         channel: 'local',
         flags: [],
         active: s.isActive,
         startTime: firstMsg,
-        lastActivity: lastMsg,
+        lastActivity: effectiveLastActivity,
         source: 'local' as const,
         userMessages: s.userMessages || 0,
         assistantMessages: s.assistantMessages || 0,

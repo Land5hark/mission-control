@@ -11,6 +11,12 @@ type TranscriptMessage = {
   timestamp?: string
 }
 
+function messageTimestampMs(message: TranscriptMessage): number {
+  if (!message.timestamp) return 0
+  const ts = new Date(message.timestamp).getTime()
+  return Number.isFinite(ts) ? ts : 0
+}
+
 function listRecentFiles(root: string, ext: string, limit: number): string[] {
   if (!root || !fs.existsSync(root)) return []
 
@@ -107,7 +113,10 @@ function readClaudeTranscript(sessionId: string, limit: number): TranscriptMessa
     }
   }
 
-  return out.slice(-limit)
+  const sorted = out
+    .slice()
+    .sort((a, b) => messageTimestampMs(a) - messageTimestampMs(b))
+  return sorted.slice(-limit)
 }
 
 function readCodexTranscript(sessionId: string, limit: number): TranscriptMessage[] {
@@ -151,7 +160,10 @@ function readCodexTranscript(sessionId: string, limit: number): TranscriptMessag
     }
   }
 
-  return out.slice(-limit)
+  const sorted = out
+    .slice()
+    .sort((a, b) => messageTimestampMs(a) - messageTimestampMs(b))
+  return sorted.slice(-limit)
 }
 
 /**

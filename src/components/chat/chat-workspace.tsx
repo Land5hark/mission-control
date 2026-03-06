@@ -397,6 +397,7 @@ function SessionConversationView({
   onRefreshTranscript: () => void
   onSavePreferences: (payload: { prefKey: string; displayName?: string; colorTag?: string }) => Promise<void>
 }) {
+  const transcriptScrollRef = useRef<HTMLDivElement | null>(null)
   const [continuePrompt, setContinuePrompt] = useState('')
   const [continueBusy, setContinueBusy] = useState(false)
   const [continueError, setContinueError] = useState<string | null>(null)
@@ -413,6 +414,12 @@ function SessionConversationView({
     setContinueError(null)
     setLastReply(null)
   }, [session.prefKey, session.displayName, session.colorTag])
+
+  useEffect(() => {
+    const container = transcriptScrollRef.current
+    if (!container) return
+    container.scrollTop = container.scrollHeight
+  }, [messages, loading, lastReply])
 
   const handleContinueSession = async () => {
     const prompt = continuePrompt.trim()
@@ -524,7 +531,37 @@ function SessionConversationView({
         {prefError && <div className="mt-2 text-xs text-red-400">{prefError}</div>}
       </div>
 
-      <div className="border-b border-border/50 px-4 py-3">
+      <div ref={transcriptScrollRef} className="flex-1 overflow-y-auto px-4 py-3">
+        {loading && (
+          <div className="space-y-2">
+            <div className="h-16 animate-pulse rounded-lg border border-border/50 bg-surface-1/60" />
+            <div className="h-20 animate-pulse rounded-lg border border-border/50 bg-surface-1/60" />
+            <div className="h-14 animate-pulse rounded-lg border border-border/50 bg-surface-1/60" />
+            <div className="text-xs text-muted-foreground">Loading transcript...</div>
+          </div>
+        )}
+        {!loading && error && (
+          <div className="text-xs text-red-400">{error}</div>
+        )}
+        {!loading && !error && messages.length === 0 && (
+          <div className="text-xs text-muted-foreground">No transcript snippets found for this session.</div>
+        )}
+        {!loading && !error && messages.length > 0 && (
+          <div className="space-y-2">
+            {messages.map((msg, idx) => (
+              <div key={`${msg.timestamp || 'no-ts'}-${idx}`} className={`rounded-lg border border-border/50 p-3 text-xs ${msg.role === 'user' ? 'bg-surface-1' : 'bg-card'}`}>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="font-medium uppercase tracking-wide text-muted-foreground">{msg.role}</span>
+                  {msg.timestamp && <span className="text-[10px] text-muted-foreground/70">{new Date(msg.timestamp).toLocaleString()}</span>}
+                </div>
+                <pre className="whitespace-pre-wrap font-sans text-foreground">{msg.content}</pre>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-border/50 px-4 py-3">
         <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">Continue session</div>
         <div className="flex gap-2">
           <input
@@ -547,31 +584,6 @@ function SessionConversationView({
           <div className="mt-2 rounded border border-border/50 bg-surface-1 p-2 text-xs text-foreground">
             <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Latest reply</div>
             <pre className="whitespace-pre-wrap font-sans">{lastReply}</pre>
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 py-3">
-        {loading && (
-          <div className="text-xs text-muted-foreground">Loading transcript...</div>
-        )}
-        {!loading && error && (
-          <div className="text-xs text-red-400">{error}</div>
-        )}
-        {!loading && !error && messages.length === 0 && (
-          <div className="text-xs text-muted-foreground">No transcript snippets found for this session.</div>
-        )}
-        {!loading && !error && messages.length > 0 && (
-          <div className="space-y-2">
-            {messages.map((msg, idx) => (
-              <div key={`${msg.timestamp || 'no-ts'}-${idx}`} className={`rounded-lg border border-border/50 p-3 text-xs ${msg.role === 'user' ? 'bg-surface-1' : 'bg-card'}`}>
-                <div className="mb-1 flex items-center justify-between">
-                  <span className="font-medium uppercase tracking-wide text-muted-foreground">{msg.role}</span>
-                  {msg.timestamp && <span className="text-[10px] text-muted-foreground/70">{new Date(msg.timestamp).toLocaleString()}</span>}
-                </div>
-                <pre className="whitespace-pre-wrap font-sans text-foreground">{msg.content}</pre>
-              </div>
-            ))}
           </div>
         )}
       </div>
