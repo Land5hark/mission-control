@@ -35,7 +35,10 @@ function ensureTable(db: ReturnType<typeof getDatabase>) {
  * Resolves websocket URL and token for a selected gateway without exposing tokens in list payloads.
  */
 export async function POST(request: NextRequest) {
-  const auth = requireRole(request, 'operator')
+  // Any authenticated dashboard user may initiate a gateway websocket connect.
+  // Restricting this to operator can cause startup fallback to connect without auth,
+  // which then fails as "device identity required".
+  const auth = requireRole(request, 'viewer')
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const db = getDatabase()
