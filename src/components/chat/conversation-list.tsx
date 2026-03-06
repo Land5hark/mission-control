@@ -22,6 +22,16 @@ const STATUS_COLORS: Record<string, string> = {
   error: 'bg-red-500',
   offline: 'bg-muted-foreground/30',
 }
+const TAG_COLORS: Record<string, string> = {
+  slate: 'bg-slate-500',
+  blue: 'bg-blue-500',
+  green: 'bg-green-500',
+  amber: 'bg-amber-500',
+  red: 'bg-red-500',
+  purple: 'bg-purple-500',
+  pink: 'bg-pink-500',
+  teal: 'bg-teal-500',
+}
 
 interface ConversationListProps {
   onNewConversation: (agentName: string) => void
@@ -42,14 +52,16 @@ export function ConversationList({ onNewConversation }: ConversationListProps) {
 
   const loadConversations = useCallback(async () => {
     try {
-      const [chatRes, sessionsRes] = await Promise.all([
+      const [chatRes, sessionsRes, prefsRes] = await Promise.all([
         fetch('/api/chat/conversations'),
         fetch('/api/sessions?include_local=1'),
+        fetch('/api/chat/session-prefs'),
       ])
 
-      if (!chatRes.ok) return
-      const chatData = await chatRes.json()
+      const chatData = chatRes.ok ? await chatRes.json() : { conversations: [] }
       const sessionsData = sessionsRes.ok ? await sessionsRes.json() : { sessions: [] }
+      const prefsPayload = prefsRes?.ok ? await prefsRes.json().catch(() => ({ prefs: {} })) : { prefs: {} }
+      const prefs = (prefsPayload?.prefs && typeof prefsPayload.prefs === 'object') ? prefsPayload.prefs : {}
 
       const chatConversations = (chatData.conversations || []).map((c: any) => ({
         id: c.conversation_id,
@@ -81,22 +93,37 @@ export function ConversationList({ onNewConversation }: ConversationListProps) {
           s?.source === 'local' &&
           (s?.kind === 'claude-code' || s?.kind === 'codex-cli')
         )
-        .map((s: any) => {
+        .map((s: any, idx: number) => {
           const lastActivityMs = Number(s.lastActivity || s.startTime || 0)
           const updatedAt = lastActivityMs > 1_000_000_000_000
             ? Math.floor(lastActivityMs / 1000)
             : lastActivityMs
           const kindLabel = s.kind === 'codex-cli' ? 'Codex' : 'Claude'
-          const sessionName = `${kindLabel} • ${s.key || s.id}`
+          const prefKey = `${s.kind}:${s.id}`
+          const pref = prefs[prefKey] || {}
+          const sessionName = pref.name || `${kindLabel} • ${s.key || s.id}`
 
           return {
             id: `session:${s.kind}:${s.id}`,
             name: sessionName,
             kind: s.kind,
             source: 'session' as const,
+            session: {
+              prefKey,
+              sessionId: String(s.id),
+              sessionKind: s.kind,
+              displayName: sessionName,
+              colorTag: typeof pref.color === 'string' ? pref.color : undefined,
+              model: s.model,
+              tokens: s.tokens,
+              workingDir: s.workingDir || null,
+              lastUserPrompt: s.lastUserPrompt || null,
+              active: !!s.active,
+              age: s.age,
+            },
             participants: [],
             lastMessage: {
-              id: Number(`9${String(s.id).replace(/\D/g, '').slice(-12)}`) || Date.now(),
+              id: Date.now() + idx,
               conversation_id: `session:${s.kind}:${s.id}`,
               from_agent: 'system',
               to_agent: null,
@@ -138,6 +165,73 @@ export function ConversationList({ onNewConversation }: ConversationListProps) {
       c.lastMessage?.content.toLowerCase().includes(s)
     )
   })
+
+  const chatRows = filteredConversations.filter((c) => c.source !== 'session')
+  const claudeRows = filteredConversations.filter((c) => c.source === 'session' && c.session?.sessionKind === 'claude-code')
+  const codexRows = filteredConversations.filter((c) => c.source === 'session' && c.session?.sessionKind === 'codex-cli')
+
+  function renderConversationItem(conv: Conversation) {
+    const displayName = conv.name || conv.id.replace('agent_', '')
+    const isSessionRow = conv.id.startsWith('session:')
+    const agentName = conv.id.replace('agent_', '')
+    const agent = agents.find(a => a.name.toLowerCase() === agentName.toLowerCase())
+    const isActive = activeConversation === conv.id
+
+    return (
+      <Button
+        key={conv.id}
+        onClick={() => handleSelect(conv.id)}
+        variant="ghost"
+        className={`w-full justify-start h-auto px-3 py-2.5 rounded-none ${
+          isActive
+            ? 'bg-accent/60 border-l-2 border-primary'
+            : 'border-l-2 border-transparent'
+        }`}
+      >
+        <div className="flex items-center gap-2 w-full">
+          {/* Mini avatar */}
+          <div className="relative flex-shrink-0">
+            <div className="w-7 h-7 rounded-full bg-surface-2 flex items-center justify-center text-[10px] font-bold text-muted-foreground">
+              {displayName.charAt(0).toUpperCase()}
+            </div>
+            {agent && !isSessionRow && (
+              <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-card ${STATUS_COLORS[agent.status] || STATUS_COLORS.offline}`} />
+            )}
+          </div>
+
+          <div className="flex-1 min-w-0 text-left">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 min-w-0">
+                {conv.session?.colorTag && TAG_COLORS[conv.session.colorTag] && (
+                  <span className={`h-2 w-2 rounded-full ${TAG_COLORS[conv.session.colorTag]}`} />
+                )}
+                <span className="text-xs font-medium text-foreground truncate">
+                  {displayName}
+                </span>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0 ml-1">
+                {conv.unreadCount > 0 && (
+                  <span className="bg-primary text-primary-foreground text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-medium">
+                    {conv.unreadCount}
+                  </span>
+                )}
+                <span className="text-[10px] text-muted-foreground/40">
+                  {conv.updatedAt ? timeAgo(conv.updatedAt) : ''}
+                </span>
+              </div>
+            </div>
+            {conv.lastMessage && (
+              <p className="text-[11px] text-muted-foreground/60 truncate mt-0.5">
+                {conv.lastMessage.from_agent === 'human'
+                  ? `You: ${conv.lastMessage.content}`
+                  : conv.lastMessage.content}
+              </p>
+            )}
+          </div>
+        </div>
+      </Button>
+    )
+  }
 
   return (
     <div className="flex flex-col h-full bg-card">
@@ -205,63 +299,32 @@ export function ConversationList({ onNewConversation }: ConversationListProps) {
             No conversations yet
           </div>
         ) : (
-          filteredConversations.map((conv) => {
-            const displayName = conv.name || conv.id.replace('agent_', '')
-            const isSessionRow = conv.id.startsWith('session:')
-            const agentName = conv.id.replace('agent_', '')
-            const agent = agents.find(a => a.name.toLowerCase() === agentName.toLowerCase())
-            const isActive = activeConversation === conv.id
-
-            return (
-              <Button
-                key={conv.id}
-                onClick={() => handleSelect(conv.id)}
-                variant="ghost"
-                className={`w-full justify-start h-auto px-3 py-2.5 rounded-none ${
-                  isActive
-                    ? 'bg-accent/60 border-l-2 border-primary'
-                    : 'border-l-2 border-transparent'
-                }`}
-              >
-                <div className="flex items-center gap-2 w-full">
-                  {/* Mini avatar */}
-                  <div className="relative flex-shrink-0">
-                    <div className="w-7 h-7 rounded-full bg-surface-2 flex items-center justify-center text-[10px] font-bold text-muted-foreground">
-                      {displayName.charAt(0).toUpperCase()}
-                    </div>
-                    {agent && !isSessionRow && (
-                      <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-card ${STATUS_COLORS[agent.status] || STATUS_COLORS.offline}`} />
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0 text-left">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-foreground truncate">
-                        {displayName}
-                      </span>
-                      <div className="flex items-center gap-1 flex-shrink-0 ml-1">
-                        {conv.unreadCount > 0 && (
-                          <span className="bg-primary text-primary-foreground text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-medium">
-                            {conv.unreadCount}
-                          </span>
-                        )}
-                        <span className="text-[10px] text-muted-foreground/40">
-                          {conv.updatedAt ? timeAgo(conv.updatedAt) : ''}
-                        </span>
-                      </div>
-                    </div>
-                    {conv.lastMessage && (
-                      <p className="text-[11px] text-muted-foreground/60 truncate mt-0.5">
-                        {conv.lastMessage.from_agent === 'human'
-                          ? `You: ${conv.lastMessage.content}`
-                          : conv.lastMessage.content}
-                      </p>
-                    )}
-                  </div>
+          <>
+            {chatRows.length > 0 && (
+              <div>
+                <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                  Chats
                 </div>
-              </Button>
-            )
-          })
+                {chatRows.map(renderConversationItem)}
+              </div>
+            )}
+            {dashboardMode === 'local' && claudeRows.length > 0 && (
+              <div>
+                <div className="px-3 pt-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                  Claude Sessions
+                </div>
+                {claudeRows.map(renderConversationItem)}
+              </div>
+            )}
+            {dashboardMode === 'local' && codexRows.length > 0 && (
+              <div>
+                <div className="px-3 pt-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                  Codex Sessions
+                </div>
+                {codexRows.map(renderConversationItem)}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

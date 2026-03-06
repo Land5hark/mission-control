@@ -213,6 +213,19 @@ export interface Conversation {
   name?: string
   kind?: string
   source?: 'chat' | 'session'
+  session?: {
+    prefKey?: string
+    sessionId: string
+    sessionKind: 'claude-code' | 'codex-cli'
+    displayName?: string
+    colorTag?: string
+    model?: string
+    tokens?: string
+    workingDir?: string | null
+    lastUserPrompt?: string | null
+    active?: boolean
+    age?: string
+  }
   participants: string[]
   lastMessage?: ChatMessage
   unreadCount: number

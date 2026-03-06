@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useCallback, useState, useRef } from 'react'
-import { useMissionControl } from '@/store'
+import { useMissionControl, type Conversation } from '@/store'
 import { useSmartPoll } from '@/lib/use-smart-poll'
 import { createClientLogger } from '@/lib/client-logger'
 import { ConversationList } from './conversation-list'
@@ -10,6 +10,11 @@ import { ChatInput } from './chat-input'
 import { Button } from '@/components/ui/button'
 
 const log = createClientLogger('ChatWorkspace')
+type SessionTranscriptMessage = {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  timestamp?: string
+}
 
 interface ChatWorkspaceProps {
   mode?: 'overlay' | 'embedded'
@@ -21,6 +26,7 @@ export function ChatWorkspace({ mode = 'embedded', onClose }: ChatWorkspaceProps
     activeConversation,
     setActiveConversation,
     setChatMessages,
+    setConversations,
     addChatMessage,
     replacePendingMessage,
     updatePendingMessage,
@@ -33,9 +39,14 @@ export function ChatWorkspace({ mode = 'embedded', onClose }: ChatWorkspaceProps
 
   const [showConversations, setShowConversations] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
+  const [sessionTranscript, setSessionTranscript] = useState<SessionTranscriptMessage[]>([])
+  const [sessionTranscriptLoading, setSessionTranscriptLoading] = useState(false)
+  const [sessionTranscriptError, setSessionTranscriptError] = useState<string | null>(null)
+  const [sessionReloadNonce, setSessionReloadNonce] = useState(0)
 
   const isOverlay = mode === 'overlay'
   const selectedConversation = conversations.find((c) => c.id === activeConversation)
+  const selectedSession = selectedConversation?.session
 
   // Detect mobile
   useEffect(() => {
@@ -177,6 +188,86 @@ export function ChatWorkspace({ mode = 'embedded', onClose }: ChatWorkspaceProps
     !!activeConversation &&
     !activeConversation.startsWith('session:')
 
+  useEffect(() => {
+    const sessionMeta = selectedSession
+    if (!sessionMeta) {
+      setSessionTranscript([])
+      setSessionTranscriptError(null)
+      return
+    }
+
+    let cancelled = false
+    setSessionTranscriptLoading(true)
+    setSessionTranscriptError(null)
+
+    fetch(`/api/sessions/transcript?kind=${encodeURIComponent(sessionMeta.sessionKind)}&id=${encodeURIComponent(sessionMeta.sessionId)}&limit=40`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}))
+          throw new Error(payload?.error || 'Failed to load transcript')
+        }
+        return res.json()
+      })
+      .then((data) => {
+        if (cancelled) return
+        setSessionTranscript(Array.isArray(data?.messages) ? data.messages : [])
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setSessionTranscript([])
+        setSessionTranscriptError(err instanceof Error ? err.message : 'Failed to load transcript')
+      })
+      .finally(() => {
+        if (!cancelled) setSessionTranscriptLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedSession, sessionReloadNonce])
+
+  const refreshSessionTranscript = useCallback(() => {
+    setSessionReloadNonce((v) => v + 1)
+  }, [])
+
+  const handleSaveSessionPreferences = useCallback(async (payload: {
+    prefKey: string
+    displayName?: string
+    colorTag?: string
+  }) => {
+    const body = {
+      key: payload.prefKey,
+      name: payload.displayName || null,
+      color: payload.colorTag || null,
+    }
+
+    const res = await fetch('/api/chat/session-prefs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data?.error || 'Failed to save session preferences')
+    }
+
+    if (!activeConversation) return
+    setConversations(
+      conversations.map((conv) => {
+        if (conv.id !== activeConversation || !conv.session) return conv
+        return {
+          ...conv,
+          name: payload.displayName || conv.name,
+          session: {
+            ...conv.session,
+            displayName: payload.displayName || conv.session.displayName,
+            colorTag: payload.colorTag || undefined,
+          },
+        }
+      })
+    )
+  }, [activeConversation, conversations, setConversations])
+
   return (
     <div className="flex h-full flex-col bg-card">
       {/* Header */}
@@ -265,12 +356,222 @@ export function ChatWorkspace({ mode = 'embedded', onClose }: ChatWorkspaceProps
               </div>
             )}
 
-            <MessageList />
-            <ChatInput
-              onSend={handleSend}
-              disabled={!canSendMessage}
-              agents={agents.map(a => ({ name: a.name, role: a.role }))}
-            />
+            {selectedConversation?.source === 'session' && selectedConversation.session ? (
+              <SessionConversationView
+                session={selectedConversation.session}
+                messages={sessionTranscript}
+                loading={sessionTranscriptLoading}
+                error={sessionTranscriptError}
+                onRefreshTranscript={refreshSessionTranscript}
+                onSavePreferences={handleSaveSessionPreferences}
+              />
+            ) : (
+              <>
+                <MessageList />
+                <ChatInput
+                  onSend={handleSend}
+                  disabled={!canSendMessage}
+                  agents={agents.map(a => ({ name: a.name, role: a.role }))}
+                />
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SessionConversationView({
+  session,
+  messages,
+  loading,
+  error,
+  onRefreshTranscript,
+  onSavePreferences,
+}: {
+  session: NonNullable<Conversation['session']>
+  messages: SessionTranscriptMessage[]
+  loading: boolean
+  error: string | null
+  onRefreshTranscript: () => void
+  onSavePreferences: (payload: { prefKey: string; displayName?: string; colorTag?: string }) => Promise<void>
+}) {
+  const [continuePrompt, setContinuePrompt] = useState('')
+  const [continueBusy, setContinueBusy] = useState(false)
+  const [continueError, setContinueError] = useState<string | null>(null)
+  const [lastReply, setLastReply] = useState<string | null>(null)
+  const [nameDraft, setNameDraft] = useState(session.displayName || '')
+  const [colorDraft, setColorDraft] = useState(session.colorTag || '')
+  const [prefBusy, setPrefBusy] = useState(false)
+  const [prefError, setPrefError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setNameDraft(session.displayName || '')
+    setColorDraft(session.colorTag || '')
+    setPrefError(null)
+    setContinueError(null)
+    setLastReply(null)
+  }, [session.prefKey, session.displayName, session.colorTag])
+
+  const handleContinueSession = async () => {
+    const prompt = continuePrompt.trim()
+    if (!prompt || continueBusy) return
+
+    setContinueBusy(true)
+    setContinueError(null)
+    setLastReply(null)
+    try {
+      const res = await fetch('/api/sessions/continue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: session.sessionKind,
+          id: session.sessionId,
+          prompt,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to continue session')
+      }
+      setContinuePrompt('')
+      if (typeof data?.reply === 'string' && data.reply.trim()) {
+        setLastReply(data.reply.trim())
+      }
+      onRefreshTranscript()
+    } catch (err) {
+      setContinueError(err instanceof Error ? err.message : 'Failed to continue session')
+    } finally {
+      setContinueBusy(false)
+    }
+  }
+
+  const handleSavePrefs = async () => {
+    if (!session.prefKey || prefBusy) return
+    setPrefBusy(true)
+    setPrefError(null)
+    try {
+      await onSavePreferences({
+        prefKey: session.prefKey,
+        displayName: nameDraft.trim() || undefined,
+        colorTag: colorDraft || undefined,
+      })
+    } catch (err) {
+      setPrefError(err instanceof Error ? err.message : 'Failed to save preferences')
+    } finally {
+      setPrefBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="border-b border-border/50 px-4 py-3 text-xs text-muted-foreground">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className={`rounded-full px-2 py-0.5 text-[10px] ${session.active ? 'bg-green-500/20 text-green-300' : 'bg-muted text-muted-foreground'}`}>
+            {session.active ? 'active' : 'idle'}
+          </span>
+          <span>{session.sessionKind === 'codex-cli' ? 'Codex CLI' : 'Claude Code'}</span>
+          {session.age && <span>• {session.age} ago</span>}
+        </div>
+        <div className="space-y-1">
+          {session.model && <div><span className="text-muted-foreground/70">Model:</span> {session.model}</div>}
+          {session.tokens && <div><span className="text-muted-foreground/70">Tokens:</span> {session.tokens}</div>}
+          {session.workingDir && <div className="truncate"><span className="text-muted-foreground/70">Dir:</span> {session.workingDir}</div>}
+          {session.lastUserPrompt && (
+            <div className="line-clamp-2">
+              <span className="text-muted-foreground/70">Last prompt:</span> {session.lastUserPrompt}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="border-b border-border/50 px-4 py-3">
+        <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">Session settings</div>
+        <div className="grid gap-2 sm:grid-cols-[1fr_120px_auto]">
+          <input
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            placeholder="Rename session"
+            maxLength={80}
+            className="h-8 rounded border border-border/60 bg-surface-1 px-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+          />
+          <select
+            value={colorDraft}
+            onChange={(e) => setColorDraft(e.target.value)}
+            className="h-8 rounded border border-border/60 bg-surface-1 px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
+          >
+            <option value="">No color</option>
+            <option value="slate">Slate</option>
+            <option value="blue">Blue</option>
+            <option value="green">Green</option>
+            <option value="amber">Amber</option>
+            <option value="red">Red</option>
+            <option value="purple">Purple</option>
+            <option value="pink">Pink</option>
+            <option value="teal">Teal</option>
+          </select>
+          <Button
+            onClick={handleSavePrefs}
+            size="sm"
+            variant="outline"
+            disabled={prefBusy || !session.prefKey}
+            className="h-8 px-3 text-xs"
+          >
+            {prefBusy ? 'Saving...' : 'Save'}
+          </Button>
+        </div>
+        {prefError && <div className="mt-2 text-xs text-red-400">{prefError}</div>}
+      </div>
+
+      <div className="border-b border-border/50 px-4 py-3">
+        <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">Continue session</div>
+        <div className="flex gap-2">
+          <input
+            value={continuePrompt}
+            onChange={(e) => setContinuePrompt(e.target.value)}
+            placeholder="Send prompt to this local session..."
+            className="h-8 flex-1 rounded border border-border/60 bg-surface-1 px-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+          />
+          <Button
+            onClick={handleContinueSession}
+            size="sm"
+            disabled={continueBusy || !continuePrompt.trim()}
+            className="h-8 px-3 text-xs"
+          >
+            {continueBusy ? 'Sending...' : 'Send'}
+          </Button>
+        </div>
+        {continueError && <div className="mt-2 text-xs text-red-400">{continueError}</div>}
+        {lastReply && (
+          <div className="mt-2 rounded border border-border/50 bg-surface-1 p-2 text-xs text-foreground">
+            <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Latest reply</div>
+            <pre className="whitespace-pre-wrap font-sans">{lastReply}</pre>
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        {loading && (
+          <div className="text-xs text-muted-foreground">Loading transcript...</div>
+        )}
+        {!loading && error && (
+          <div className="text-xs text-red-400">{error}</div>
+        )}
+        {!loading && !error && messages.length === 0 && (
+          <div className="text-xs text-muted-foreground">No transcript snippets found for this session.</div>
+        )}
+        {!loading && !error && messages.length > 0 && (
+          <div className="space-y-2">
+            {messages.map((msg, idx) => (
+              <div key={`${msg.timestamp || 'no-ts'}-${idx}`} className={`rounded-lg border border-border/50 p-3 text-xs ${msg.role === 'user' ? 'bg-surface-1' : 'bg-card'}`}>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="font-medium uppercase tracking-wide text-muted-foreground">{msg.role}</span>
+                  {msg.timestamp && <span className="text-[10px] text-muted-foreground/70">{new Date(msg.timestamp).toLocaleString()}</span>}
+                </div>
+                <pre className="whitespace-pre-wrap font-sans text-foreground">{msg.content}</pre>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -300,7 +601,7 @@ function AgentAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }
 }
 
 function getConversationStatus(agents: Array<{ name: string; status: string }>, conversationId: string): string {
-  if (conversationId.startsWith('session:')) return 'Local session (read-only)'
+  if (conversationId.startsWith('session:')) return 'Local session'
   const name = conversationId.replace('agent_', '')
   const agent = agents.find(a => a.name.toLowerCase() === name.toLowerCase())
   if (!agent) return 'Unknown'
