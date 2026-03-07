@@ -209,7 +209,7 @@ export function OverviewTab({
                 </select>
               ) : (
                 <span className="text-foreground font-mono text-xs">
-                  {(agent as any).config?.model?.primary || (typeof (agent as any).model === 'string' ? (agent as any).model : (agent as any).model?.primary) || 'default'}
+                  {(() => { const p = (agent as any).config?.model?.primary; const m = (agent as any).model; const v = typeof p === 'string' ? p : p?.primary; return v || (typeof m === 'string' ? m : m?.primary) || 'default' })()}
                 </span>
               )}
             </div>

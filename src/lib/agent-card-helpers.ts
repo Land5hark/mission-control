@@ -4,7 +4,8 @@
 
 /** Strip provider prefix from model ID: "anthropic/claude-opus-4-5" → "claude-opus-4-5" */
 export function formatModelName(config: any): string | null {
-  const primary = config?.model?.primary
+  const raw = config?.model?.primary
+  const primary = typeof raw === 'string' ? raw : raw?.primary
   if (!primary || typeof primary !== 'string') return null
   const parts = primary.split('/')
   return parts[parts.length - 1]
