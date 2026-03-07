@@ -29,12 +29,12 @@ const navGroups: NavGroup[] = [
         id: 'agents', label: 'Agents', icon: <AgentsIcon />, priority: true,
         children: [
           { id: 'agent-costs', label: 'Agent Costs', icon: <AgentCostsIcon />, priority: false },
-          { id: 'memory', label: 'Memory', icon: <MemoryIcon />, priority: false },
         ],
       },
       { id: 'tasks', label: 'Tasks', icon: <TasksIcon />, priority: true },
       { id: 'chat', label: 'Chat', icon: <ChatIcon />, priority: false },
       { id: 'skills', label: 'Skills', icon: <SkillsIcon />, priority: false },
+      { id: 'memory', label: 'Memory', icon: <MemoryIcon />, priority: false },
       { id: 'office', label: 'Office', icon: <OfficeIcon />, priority: false },
     ],
   },
@@ -249,33 +249,45 @@ export function NavRail() {
                       }
                       return (
                         <div key={item.id}>
-                          <Button
-                            variant="ghost"
-                            onClick={() => toggleParent(item.id)}
-                            onMouseEnter={() => item.children?.forEach(child => prefetchPanel(child.id))}
-                            onFocus={() => item.children?.forEach(child => prefetchPanel(child.id))}
-                            className={`w-full flex items-center gap-2 px-2 py-1.5 h-auto rounded-lg text-left justify-start relative ${
-                              childActive && !isParentExpanded
-                                ? 'bg-primary/15 text-primary hover:bg-primary/20'
-                                : ''
-                            }`}
-                          >
-                            <div className="w-5 h-5 shrink-0">{item.icon}</div>
-                            <span className="text-sm truncate flex-1">{item.label}</span>
-                            <svg
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className={`w-3 h-3 shrink-0 text-muted-foreground/40 transition-transform duration-150 ${
-                                isParentExpanded ? '' : '-rotate-90'
+                          <div className="flex items-center w-full">
+                            <Button
+                              variant="ghost"
+                              onClick={() => { navigateToPanel(item.id); if (!isParentExpanded) toggleParent(item.id) }}
+                              onMouseEnter={() => { prefetchPanel(item.id); item.children?.forEach(child => prefetchPanel(child.id)) }}
+                              onFocus={() => item.children?.forEach(child => prefetchPanel(child.id))}
+                              className={`flex-1 flex items-center gap-2 px-2 py-1.5 h-auto rounded-lg rounded-r-none text-left justify-start relative ${
+                                activeTab === item.id
+                                  ? 'bg-primary/15 text-primary hover:bg-primary/20'
+                                  : childActive && !isParentExpanded
+                                    ? 'bg-primary/10 text-primary/80 hover:bg-primary/15'
+                                    : ''
                               }`}
                             >
-                              <polyline points="4,6 8,10 12,6" />
-                            </svg>
-                          </Button>
+                              {activeTab === item.id && (
+                                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-primary rounded-r-full" />
+                              )}
+                              <div className="w-5 h-5 shrink-0">{item.icon}</div>
+                              <span className="text-sm truncate flex-1">{item.label}</span>
+                            </Button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleParent(item.id) }}
+                              className="px-1.5 py-1.5 rounded-r-lg hover:bg-secondary/50 transition-colors"
+                            >
+                              <svg
+                                viewBox="0 0 16 16"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className={`w-3 h-3 shrink-0 text-muted-foreground/40 transition-transform duration-150 ${
+                                  isParentExpanded ? '' : '-rotate-90'
+                                }`}
+                              >
+                                <polyline points="4,6 8,10 12,6" />
+                              </svg>
+                            </button>
+                          </div>
                           <div
                             className={`overflow-hidden transition-all duration-150 ease-in-out ${
                               isParentExpanded ? 'max-h-[200px] opacity-100' : 'max-h-0 opacity-0'
