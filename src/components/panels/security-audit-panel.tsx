@@ -117,6 +117,19 @@ export function SecurityAuditPanel() {
       ])
       if (auditRes.ok) {
         const audit = await auditRes.json()
+        // API returns authEvents as { loginFailures, tokenRotations, accessDenials, recentEvents }
+        // but the panel expects authEvents to be an array of AuthEvent
+        if (audit.authEvents && !Array.isArray(audit.authEvents)) {
+          const events = audit.authEvents.recentEvents || []
+          audit.authEvents = events.map((e: any, i: number) => ({
+            id: i,
+            type: (e.event_type || '').replace('auth.', ''),
+            actor: e.agent_name || 'unknown',
+            ip: e.ip_address || '',
+            timestamp: e.created_at || 0,
+            detail: e.detail || '',
+          }))
+        }
         setData(audit)
         if (audit.posture) {
           setSecurityPosture(audit.posture)

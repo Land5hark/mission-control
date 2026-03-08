@@ -250,7 +250,8 @@ export default function Home() {
         markStep('config')
       })
       .catch(() => { markStep('config') })
-  }, [connect, pathname, router, setCurrentUser, setDashboardMode, setGatewayAvailable, setCapabilitiesChecked, setSubscription, setUpdateAvailable, setShowOnboarding])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- boot once on mount, not on every pathname change
+  }, [connect, router, setCurrentUser, setDashboardMode, setGatewayAvailable, setCapabilitiesChecked, setSubscription, setUpdateAvailable, setShowOnboarding])
 
   if (!isClient || !bootComplete) {
     return <Loader variant="page" steps={isClient ? initSteps : undefined} />
