@@ -47,21 +47,15 @@ function hostMatches(pattern: string, hostname: string): boolean {
 
 function addSecurityHeaders(response: NextResponse, request: NextRequest): NextResponse {
   const requestId = crypto.randomUUID()
-  const nonce = crypto.randomBytes(16).toString('base64')
-
   response.headers.set('X-Request-Id', requestId)
   response.headers.set('X-Content-Type-Options', 'nosniff')
   response.headers.set('X-Frame-Options', 'DENY')
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
 
-  // Pass nonce to downstream pages via request header
-  request.headers.set('x-csp-nonce', nonce)
-
-  // Build CSP matching next.config.js but with nonce added
   const googleEnabled = !!(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID)
   const csp = [
     `default-src 'self'`,
-    `script-src 'self' 'unsafe-inline' 'nonce-${nonce}'${googleEnabled ? ' https://accounts.google.com' : ''}`,
+    `script-src 'self' 'unsafe-inline'${googleEnabled ? ' https://accounts.google.com' : ''}`,
     `style-src 'self' 'unsafe-inline'`,
     `connect-src 'self' ws: wss: http://127.0.0.1:* http://localhost:*`,
     `img-src 'self' data: blob:${googleEnabled ? ' https://*.googleusercontent.com https://lh3.googleusercontent.com' : ''}`,
