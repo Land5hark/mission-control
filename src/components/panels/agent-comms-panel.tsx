@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { useSmartPoll } from '@/lib/use-smart-poll'
 import { useMissionControl, type LogEntry, type Session } from '@/store'
 
+import type { AggregateEvent } from '@/app/api/sessions/transcript/aggregate/route'
+
 const COORDINATOR_AGENT = (process.env.NEXT_PUBLIC_COORDINATOR_AGENT || 'coordinator').toLowerCase()
 
 // ── Feed categories (mirrors OpenClaw TUI FeedCategory) ──
@@ -142,6 +144,27 @@ function commsToFeed(messages: CommsMessage[]): FeedEvent[] {
   })
 }
 
+function transcriptToFeed(events: AggregateEvent[]): FeedEvent[] {
+  return events.map(e => {
+    let category: FeedCategory = 'chat'
+    if (e.type === 'tool_use' || e.type === 'tool_result') category = 'tools'
+    else if (e.type === 'thinking') category = 'trace'
+    else if (e.role === 'system') category = 'system'
+
+    return {
+      id: e.id,
+      ts: e.ts,
+      category,
+      source: e.agentName,
+      message: e.type === 'tool_use' ? `tool: ${e.content}`
+        : e.type === 'tool_result' ? `result: ${e.content}`
+        : e.type === 'thinking' ? `[thinking] ${e.content}`
+        : e.content,
+      data: e.metadata,
+    }
+  })
+}
+
 // ── Main component ──
 
 interface Target {
@@ -153,6 +176,8 @@ interface Target {
 export function AgentCommsPanel() {
   const [filter, setFilter] = useState<FeedFilter>('all')
   const [commsData, setCommsData] = useState<CommsData | null>(null)
+  const [transcriptData, setTranscriptData] = useState<AggregateEvent[]>([])
+  const [transcriptSessionCount, setTranscriptSessionCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -187,14 +212,33 @@ export function AgentCommsPanel() {
 
   useSmartPoll(fetchComms, 15000)
 
+  // Fetch aggregated transcript events from all gateway sessions
+  const fetchTranscripts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sessions/transcript/aggregate?limit=200')
+      if (!res.ok) return
+      const json = await res.json()
+      setTranscriptData(json.events || [])
+      setTranscriptSessionCount(json.sessionCount || 0)
+    } catch {
+      // Silent — transcript is supplementary data
+    }
+  }, [])
+
+  useSmartPoll(fetchTranscripts, 20000)
+
   // Merge all sources into a single chronological feed
   const feedEvents = useMemo(() => {
     const fromLogs = logsToFeed(logs)
     const fromComms = commsToFeed(commsData?.messages || [])
-    const merged = [...fromLogs, ...fromComms]
-    merged.sort((a, b) => a.ts - b.ts)
-    return merged
-  }, [logs, commsData?.messages])
+    const fromTranscripts = transcriptToFeed(transcriptData)
+    const merged = [...fromLogs, ...fromComms, ...fromTranscripts]
+    // Deduplicate by id
+    const seen = new Set<string>()
+    const deduped = merged.filter(e => { if (seen.has(e.id)) return false; seen.add(e.id); return true })
+    deduped.sort((a, b) => a.ts - b.ts)
+    return deduped
+  }, [logs, commsData?.messages, transcriptData])
 
   const filteredFeed = useMemo(() => {
     if (filter === 'all') return feedEvents
@@ -339,10 +383,10 @@ export function AgentCommsPanel() {
         ))}
 
         {/* Session count */}
-        {sessions.length > 0 && (
+        {(sessions.length > 0 || transcriptSessionCount > 0) && (
           <div className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground/50">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            {sessions.filter(s => s.active).length}/{sessions.length} sessions
+            {sessions.filter(s => s.active).length}/{transcriptSessionCount || sessions.length} sessions
           </div>
         )}
       </div>
