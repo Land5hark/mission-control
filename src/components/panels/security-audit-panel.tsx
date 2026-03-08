@@ -82,8 +82,28 @@ interface AgentEval {
   lastEvalAt: number
 }
 
+interface ScanCheck {
+  id: string
+  name: string
+  status: 'pass' | 'fail' | 'warn'
+  detail: string
+  fix: string
+}
+
+interface ScanCategory {
+  score: number
+  checks: ScanCheck[]
+}
+
+interface ScanData {
+  score: number
+  overall: string
+  categories: Record<string, ScanCategory>
+}
+
 interface SecurityAuditData {
   posture: { score: number; level: string }
+  scan?: ScanData
   authEvents: AuthEvent[]
   agentTrust: AgentTrust[]
   secretAlerts: SecretAlert[]
@@ -97,6 +117,55 @@ interface AgentEvalsData {
   agents: AgentEval[]
   overallConvergence: number
   driftAlerts: string[]
+}
+
+const SCAN_STATUS_ICON: Record<string, string> = { pass: '+', fail: 'x', warn: '!' }
+const SCAN_STATUS_COLOR: Record<string, string> = { pass: 'text-green-400', fail: 'text-red-400', warn: 'text-amber-400' }
+
+function ScanCategoryRow({ label, icon, category, failingCount }: {
+  label: string; icon: string; category: ScanCategory; failingCount: number
+}) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="border border-border/50 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-secondary/50 transition-colors"
+      >
+        <span className="w-5 h-5 rounded bg-secondary flex items-center justify-center text-xs font-mono text-muted-foreground">
+          {icon}
+        </span>
+        <span className="flex-1 text-sm font-medium">{label}</span>
+        <span className={`text-xs tabular-nums ${category.score >= 80 ? 'text-green-400' : category.score >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+          {category.score}%
+        </span>
+        {failingCount > 0 && (
+          <span className="text-xs text-muted-foreground">
+            {failingCount} issue{failingCount > 1 ? 's' : ''}
+          </span>
+        )}
+        <span className="text-xs text-muted-foreground/50">{expanded ? '-' : '+'}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border/30 px-3 py-2 space-y-1.5 bg-secondary/20">
+          {category.checks.map(check => (
+            <div key={check.id} className="flex items-start gap-2 py-1">
+              <span className={`font-mono text-xs mt-0.5 w-4 shrink-0 ${SCAN_STATUS_COLOR[check.status]}`}>
+                [{SCAN_STATUS_ICON[check.status]}]
+              </span>
+              <div className="flex-1 min-w-0">
+                <span className="text-sm">{check.name}</span>
+                <p className="text-xs text-muted-foreground">{check.detail}</p>
+                {check.fix && check.status !== 'pass' && (
+                  <p className="text-xs text-primary/70 mt-0.5">Fix: {check.fix}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function SecurityAuditPanel() {
@@ -313,11 +382,33 @@ export function SecurityAuditPanel() {
                   {data.posture.level}
                 </span>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Composite score based on auth health, secret exposure, tool compliance, and eval convergence.
+                  Blended score: 70% infrastructure configuration, 30% event history.
                 </p>
               </div>
             </div>
           </div>
+
+          {/* Infrastructure Scan Categories */}
+          {data.scan && (
+            <div className="bg-card border border-border rounded-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold">Infrastructure Scan</h2>
+                <span className={`text-sm font-bold tabular-nums ${postureColor(data.scan.score)}`}>
+                  {data.scan.score}/100
+                </span>
+              </div>
+              <div className="space-y-2">
+                {Object.entries(data.scan.categories).map(([key, cat]) => {
+                  const label = { credentials: 'Credentials', network: 'Network', openclaw: 'OpenClaw', runtime: 'Runtime', os: 'OS Security' }[key] || key
+                  const icon = { credentials: 'K', network: 'N', openclaw: 'O', runtime: 'R', os: 'S' }[key] || key[0].toUpperCase()
+                  const failing = cat.checks.filter(c => c.status !== 'pass')
+                  return (
+                    <ScanCategoryRow key={key} label={label} icon={icon} category={cat} failingCount={failing.length} />
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Auth Events + Agent Trust */}
           <div className="grid lg:grid-cols-2 gap-6">

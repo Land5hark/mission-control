@@ -5,6 +5,7 @@ import { readLimiter } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
 import { getSecurityPosture } from '@/lib/security-events'
 import { getMcpCallStats } from '@/lib/mcp-audit'
+import { runSecurityScan } from '@/lib/security-scan'
 
 type Timeframe = 'hour' | 'day' | 'week' | 'month'
 
@@ -34,11 +35,17 @@ export async function GET(request: NextRequest) {
     const since = Math.floor(Date.now() / 1000) - seconds
     const db = getDatabase()
 
-    // Posture
-    const posture = getSecurityPosture(workspaceId)
-    const level = posture.score >= 90 ? 'hardened'
-      : posture.score >= 70 ? 'secure'
-      : posture.score >= 40 ? 'needs-attention'
+    // Infrastructure scan (same as onboarding security scan)
+    const scan = runSecurityScan()
+
+    // Event-based posture (incidents, trust scores)
+    const eventPosture = getSecurityPosture(workspaceId)
+
+    // Blend: weighted average — 70% infrastructure config, 30% event history
+    const blendedScore = Math.round(scan.score * 0.7 + eventPosture.score * 0.3)
+    const level = blendedScore >= 90 ? 'hardened'
+      : blendedScore >= 70 ? 'secure'
+      : blendedScore >= 40 ? 'needs-attention'
       : 'at-risk'
 
     // Auth events
@@ -156,7 +163,12 @@ export async function GET(request: NextRequest) {
     const severityMap: Record<number, string> = { 3: 'critical', 2: 'warning', 1: 'info' }
 
     return NextResponse.json({
-      posture: { score: posture.score, level },
+      posture: { score: blendedScore, level },
+      scan: {
+        score: scan.score,
+        overall: scan.overall,
+        categories: scan.categories,
+      },
       authEvents: {
         loginFailures,
         tokenRotations,
