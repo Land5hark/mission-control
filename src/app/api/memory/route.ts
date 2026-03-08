@@ -3,6 +3,7 @@ import { readdir, readFile, stat, lstat, realpath, writeFile, mkdir, unlink } fr
 import { existsSync, mkdirSync } from 'fs'
 import { join, dirname, sep } from 'path'
 import { config } from '@/lib/config'
+import { db_helpers } from '@/lib/db'
 import { resolveWithin } from '@/lib/paths'
 import { requireRole } from '@/lib/auth'
 import { readLimiter, mutationLimiter } from '@/lib/rate-limit'
@@ -334,6 +335,9 @@ export async function POST(request: NextRequest) {
       const schemaWarnings = schemaResult?.errors ?? []
 
       await writeFile(fullPath, content, 'utf-8')
+      try {
+        db_helpers.logActivity('memory_file_saved', 'memory', 0, auth.user.username || 'unknown', `Updated ${path}`, { path, size: content.length })
+      } catch { /* best-effort */ }
       return NextResponse.json({
         success: true,
         message: 'File saved successfully',
@@ -361,6 +365,9 @@ export async function POST(request: NextRequest) {
       }
 
       await writeFile(fullPath, content || '', 'utf-8')
+      try {
+        db_helpers.logActivity('memory_file_created', 'memory', 0, auth.user.username || 'unknown', `Created ${path}`, { path })
+      } catch { /* best-effort */ }
       return NextResponse.json({ success: true, message: 'File created successfully' })
     }
 
@@ -403,6 +410,9 @@ export async function DELETE(request: NextRequest) {
       }
 
       await unlink(fullPath)
+      try {
+        db_helpers.logActivity('memory_file_deleted', 'memory', 0, auth.user.username || 'unknown', `Deleted ${path}`, { path })
+      } catch { /* best-effort */ }
       return NextResponse.json({ success: true, message: 'File deleted successfully' })
     }
 

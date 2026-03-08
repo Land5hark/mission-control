@@ -165,6 +165,27 @@ function transcriptToFeed(events: AggregateEvent[]): FeedEvent[] {
   })
 }
 
+interface ActivityRecord {
+  id: number
+  type: string
+  actor: string
+  description: string
+  data: any
+  created_at: number
+}
+
+function activitiesToFeed(activities: ActivityRecord[]): FeedEvent[] {
+  return activities.map(a => ({
+    id: `activity-${a.id}`,
+    ts: a.created_at * 1000,
+    category: 'system' as FeedCategory,
+    source: a.actor || 'system',
+    message: a.description || a.type,
+    level: 'info' as const,
+    data: a.data,
+  }))
+}
+
 // ── Main component ──
 
 interface Target {
@@ -178,6 +199,7 @@ export function AgentCommsPanel() {
   const [commsData, setCommsData] = useState<CommsData | null>(null)
   const [transcriptData, setTranscriptData] = useState<AggregateEvent[]>([])
   const [transcriptSessionCount, setTranscriptSessionCount] = useState(0)
+  const [activityEvents, setActivityEvents] = useState<ActivityRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -227,18 +249,33 @@ export function AgentCommsPanel() {
 
   useSmartPoll(fetchTranscripts, 20000)
 
+  // Fetch memory/agent activity events
+  const fetchActivities = useCallback(async () => {
+    try {
+      const res = await fetch('/api/activities?type=agent_memory_updated,agent_memory_cleared,memory_file_saved,memory_file_created,memory_file_deleted&limit=50')
+      if (!res.ok) return
+      const json = await res.json()
+      setActivityEvents(json.activities || [])
+    } catch {
+      // Silent — activities are supplementary
+    }
+  }, [])
+
+  useSmartPoll(fetchActivities, 30000)
+
   // Merge all sources into a single chronological feed
   const feedEvents = useMemo(() => {
     const fromLogs = logsToFeed(logs)
     const fromComms = commsToFeed(commsData?.messages || [])
     const fromTranscripts = transcriptToFeed(transcriptData)
-    const merged = [...fromLogs, ...fromComms, ...fromTranscripts]
+    const fromActivities = activitiesToFeed(activityEvents)
+    const merged = [...fromLogs, ...fromComms, ...fromTranscripts, ...fromActivities]
     // Deduplicate by id
     const seen = new Set<string>()
     const deduped = merged.filter(e => { if (seen.has(e.id)) return false; seen.add(e.id); return true })
     deduped.sort((a, b) => a.ts - b.ts)
     return deduped
-  }, [logs, commsData?.messages, transcriptData])
+  }, [logs, commsData?.messages, transcriptData, activityEvents])
 
   const filteredFeed = useMemo(() => {
     if (filter === 'all') return feedEvents
@@ -285,7 +322,16 @@ export function AgentCommsPanel() {
         }),
       })
       const payload = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(payload?.error || 'Failed to send')
+      if (!res.ok) {
+        if (res.status === 422 && payload?.injection) {
+          const rules = payload.injection.map((i: any) => i.description || i.rule).join('; ')
+          throw new Error(`Message blocked: content triggered safety filter (${rules})`)
+        }
+        if (res.status === 403) {
+          throw new Error('You need operator access to send messages')
+        }
+        throw new Error(payload?.error || 'Failed to send')
+      }
 
       if (payload?.forward?.attempted && !payload?.forward?.delivered) {
         const reason = payload?.forward?.reason || 'unknown'
@@ -424,7 +470,7 @@ export function AgentCommsPanel() {
       <div
         ref={feedContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto min-h-0"
+        className="flex-1 overflow-y-auto min-h-0 max-h-[500px]"
       >
         {filteredFeed.length === 0 ? (
           <EmptyState filter={filter} />
