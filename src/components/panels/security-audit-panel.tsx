@@ -130,6 +130,73 @@ export function SecurityAuditPanel() {
             detail: e.detail || '',
           }))
         }
+        // agentTrust: { agents: [...], flaggedCount } → AgentTrust[]
+        if (audit.agentTrust && !Array.isArray(audit.agentTrust)) {
+          const agents = audit.agentTrust.agents || []
+          const flaggedThreshold = 0.8
+          audit.agentTrust = agents.map((a: any, i: number) => ({
+            agentId: i,
+            name: a.name,
+            trustScore: a.score,
+            flagged: a.score < flaggedThreshold,
+          }))
+        }
+        // secretExposures → secretAlerts
+        if (audit.secretExposures && !audit.secretAlerts) {
+          const recent = audit.secretExposures.recent || []
+          audit.secretAlerts = recent.map((e: any, i: number) => ({
+            id: i,
+            file: e.detail || '',
+            line: 0,
+            type: (e.event_type || '').replace('secret.', ''),
+            preview: e.detail || '',
+            detectedAt: e.created_at || 0,
+            resolved: false,
+          }))
+        }
+        if (!Array.isArray(audit.secretAlerts)) audit.secretAlerts = []
+        // mcpAudit → toolAudit
+        if (audit.mcpAudit && !audit.toolAudit) {
+          const topTools = audit.mcpAudit.topTools || []
+          audit.toolAudit = topTools.map((t: any) => ({
+            tool: t.name,
+            calls: t.count,
+            successes: t.count,
+            failures: 0,
+          }))
+        }
+        if (!Array.isArray(audit.toolAudit)) audit.toolAudit = []
+        // rateLimits: { totalHits, byIp } → RateLimitSignal[]
+        if (audit.rateLimits && !Array.isArray(audit.rateLimits)) {
+          const byIp = audit.rateLimits.byIp || []
+          audit.rateLimits = byIp.map((r: any) => ({
+            ip: r.ip,
+            hits: r.count,
+            lastHit: 0,
+          }))
+        }
+        // injectionAttempts: { total, recent } → InjectionAttempt[]
+        if (audit.injectionAttempts && !Array.isArray(audit.injectionAttempts)) {
+          const recent = audit.injectionAttempts.recent || []
+          audit.injectionAttempts = recent.map((e: any, i: number) => ({
+            id: i,
+            type: (e.event_type || '').replace('injection.', ''),
+            source: e.agent_name || e.ip_address || 'unknown',
+            input: e.detail || '',
+            blocked: true,
+            timestamp: e.created_at || 0,
+          }))
+        }
+        // timeline: [{timestamp, eventCount, severity}] → [{timestamp, authEvents, ...}]
+        if (Array.isArray(audit.timeline)) {
+          audit.timeline = audit.timeline.map((t: any) => ({
+            timestamp: t.timestamp,
+            authEvents: t.eventCount || 0,
+            injectionAttempts: 0,
+            secretAlerts: 0,
+            toolCalls: 0,
+          }))
+        }
         setData(audit)
         if (audit.posture) {
           setSecurityPosture(audit.posture)
