@@ -12,6 +12,7 @@ import { MODEL_CATALOG } from '@/lib/models'
 import { logger } from '@/lib/logger'
 import { detectProviderSubscriptions, getPrimarySubscription } from '@/lib/provider-subscriptions'
 import { APP_VERSION } from '@/lib/version'
+import { isHermesInstalled, scanHermesSessions } from '@/lib/hermes-sessions'
 
 export async function GET(request: NextRequest) {
   const auth = requireRole(request, 'viewer')
@@ -669,7 +670,15 @@ async function getCapabilities() {
     // settings table may not exist yet
   }
 
-  return { gateway, openclawHome, claudeHome, claudeSessions, subscription, subscriptions, processUser, interfaceMode }
+  const hermesInstalled = isHermesInstalled()
+  let hermesSessions = 0
+  if (hermesInstalled) {
+    try {
+      hermesSessions = scanHermesSessions(50).filter(s => s.isActive).length
+    } catch { /* ignore */ }
+  }
+
+  return { gateway, openclawHome, claudeHome, claudeSessions, hermesInstalled, hermesSessions, subscription, subscriptions, processUser, interfaceMode }
 }
 
 function isPortOpen(host: string, port: number): Promise<boolean> {

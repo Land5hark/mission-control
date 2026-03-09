@@ -567,7 +567,7 @@ function SessionConversationView({
           <span className={`rounded-full px-2 py-0.5 text-[10px] ${session.active ? 'bg-green-500/20 text-green-300' : 'bg-muted text-muted-foreground'}`}>
             {session.active ? 'active' : 'idle'}
           </span>
-          <span className="font-mono-tight">{session.sessionKind === 'codex-cli' ? 'Codex CLI' : session.sessionKind === 'gateway' ? 'Gateway' : 'Claude Code'}</span>
+          <span className="font-mono-tight">{session.sessionKind === 'codex-cli' ? 'Codex CLI' : session.sessionKind === 'hermes' ? 'Hermes Agent' : session.sessionKind === 'gateway' ? 'Gateway' : 'Claude Code'}</span>
           {session.model && <span className="text-muted-foreground/60">{session.model}</span>}
           {session.tokens && <span className="text-muted-foreground/60">{session.tokens}</span>}
           {session.workingDir && <span className="hidden truncate text-muted-foreground/50 sm:inline max-w-[200px]">{session.workingDir}</span>}
@@ -750,6 +750,7 @@ function getConversationStatus(agents: Array<{ name: string; status: string }>, 
   if (conversationId.startsWith('session:')) {
     if (conversationId.includes('claude-code')) return 'Local Claude session'
     if (conversationId.includes('codex-cli')) return 'Local Codex session'
+    if (conversationId.includes('hermes')) return 'Local Hermes session'
     return 'Gateway session'
   }
   const name = conversationId.replace('agent_', '')

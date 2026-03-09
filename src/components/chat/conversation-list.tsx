@@ -187,7 +187,7 @@ export function ConversationList({ onNewConversation: _onNewConversation }: Conv
       const providerSessions = (sessionsData.sessions || [])
         .filter((s: any) => {
           if (dashboardMode === 'local') {
-            return s?.source === 'local' && (s?.kind === 'claude-code' || s?.kind === 'codex-cli')
+            return s?.source === 'local' && (s?.kind === 'claude-code' || s?.kind === 'codex-cli' || s?.kind === 'hermes')
           }
           return s?.source === 'gateway'
         })
@@ -200,14 +200,16 @@ export function ConversationList({ onNewConversation: _onNewConversation }: Conv
             ? 'Codex'
             : s.kind === 'claude-code'
               ? 'Claude'
-              : 'Gateway'
+              : s.kind === 'hermes'
+                ? 'Hermes'
+                : 'Gateway'
           const prefKey = `${s.kind}:${s.id}`
           const pref = prefs[prefKey] || {}
           const defaultName = dashboardMode === 'local'
             ? `${kindLabel} • ${s.key || s.id}`
             : `${s.agent || 'Gateway'} • ${s.key || s.id}`
           const sessionName = pref.name || defaultName
-          const sessionKind = s.kind === 'claude-code' || s.kind === 'codex-cli' ? s.kind : 'gateway'
+          const sessionKind = s.kind === 'claude-code' || s.kind === 'codex-cli' || s.kind === 'hermes' ? s.kind : 'gateway'
 
           return {
             id: `session:${s.kind}:${s.id}`,
@@ -273,7 +275,7 @@ export function ConversationList({ onNewConversation: _onNewConversation }: Conv
   const gatewayRows = filteredConversations.filter((c) => c.source === 'session' && c.session?.sessionKind === 'gateway')
   const activeGatewayRows = gatewayRows.filter((c) => c.session?.active)
   const inactiveGatewayRows = gatewayRows.filter((c) => !c.session?.active)
-  const localRows = filteredConversations.filter((c) => c.source === 'session' && (c.session?.sessionKind === 'claude-code' || c.session?.sessionKind === 'codex-cli'))
+  const localRows = filteredConversations.filter((c) => c.source === 'session' && (c.session?.sessionKind === 'claude-code' || c.session?.sessionKind === 'codex-cli' || c.session?.sessionKind === 'hermes'))
   const activeLocalRows = localRows.filter((c) => c.session?.active)
   const inactiveLocalRows = localRows.filter((c) => !c.session?.active)
 
@@ -317,8 +319,8 @@ export function ConversationList({ onNewConversation: _onNewConversation }: Conv
                   <span className={`h-2 w-2 rounded-full ${TAG_COLORS[conv.session.colorTag]}`} />
                 )}
                 {isSessionRow && conv.session?.sessionKind && conv.session.sessionKind !== 'gateway' && (
-                  <span className={`rounded px-1 py-px text-[9px] font-medium ${conv.session.sessionKind === 'codex-cli' ? 'bg-amber-500/15 text-amber-400/80' : 'bg-primary/15 text-primary/80'}`}>
-                    {conv.session.sessionKind === 'codex-cli' ? 'CX' : 'CC'}
+                  <span className={`rounded px-1 py-px text-[9px] font-medium ${conv.session.sessionKind === 'codex-cli' ? 'bg-amber-500/15 text-amber-400/80' : conv.session.sessionKind === 'hermes' ? 'bg-purple-500/15 text-purple-400/80' : 'bg-primary/15 text-primary/80'}`}>
+                    {conv.session.sessionKind === 'codex-cli' ? 'CX' : conv.session.sessionKind === 'hermes' ? 'HM' : 'CC'}
                   </span>
                 )}
                 {isEditing ? (

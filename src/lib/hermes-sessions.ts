@@ -51,7 +51,8 @@ function getHermesPidPath(): string {
 }
 
 export function isHermesInstalled(): boolean {
-  return existsSync(getHermesDbPath())
+  // Check for state.db (created after first agent run) OR config.yaml (created by hermes setup)
+  return existsSync(getHermesDbPath()) || existsSync(join(config.homeDir, '.hermes', 'config.yaml'))
 }
 
 export function isHermesGatewayRunning(): boolean {
