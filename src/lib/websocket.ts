@@ -9,6 +9,7 @@ import {
   signPayload,
   getCachedDeviceToken,
   cacheDeviceToken,
+  clearDeviceIdentity,
 } from '@/lib/device-identity'
 import { APP_VERSION } from '@/lib/version'
 import { createClientLogger } from '@/lib/client-logger'
@@ -16,6 +17,7 @@ import {
   ConnectErrorDetailCodes,
   readErrorDetailCode,
   NON_RETRYABLE_ERROR_CODES,
+  shouldRetryWithoutDeviceIdentity,
 } from '@/lib/websocket-utils'
 
 const log = createClientLogger('WebSocket')
@@ -67,6 +69,8 @@ const pingSentTimestamps: { current: Map<string, number> } = { current: new Map(
 const missedPongsRef: { current: number } = { current: 0 }
 const gatewaySupportsPingRef: { current: boolean } = { current: true }
 const lastSeqRef: { current: number | null } = { current: null }
+const tokenOnlyFallbackRef: { current: boolean } = { current: false }
+const tokenOnlyFallbackTriedRef: { current: boolean } = { current: false }
 
 export function useWebSocket() {
   const maxReconnectAttempts = 10
@@ -226,7 +230,7 @@ export function useWebSocket() {
     const authToken = authTokenRef.current || undefined
     const tokenForSignature = authToken ?? cachedToken ?? ''
 
-    if (nonce) {
+    if (nonce && !tokenOnlyFallbackRef.current) {
       try {
         const identity = await getOrCreateDeviceIdentity()
         const signedAt = Date.now()
@@ -276,7 +280,7 @@ export function useWebSocket() {
         caps: ['tool-events'],
         auth: authToken ? { token: authToken } : undefined,
         device,
-        deviceToken: cachedToken || undefined,
+        deviceToken: tokenOnlyFallbackRef.current ? undefined : (cachedToken || undefined),
       }
     }
     log.info('Sending connect handshake')
@@ -411,6 +415,31 @@ export function useWebSocket() {
       log.error(`Gateway error: ${frame.error?.message || JSON.stringify(frame.error)}`)
       const rawMessage = frame.error?.message || JSON.stringify(frame.error)
       const help = getGatewayErrorHelp(rawMessage)
+      const shouldFallbackToTokenOnly = shouldRetryWithoutDeviceIdentity(
+        rawMessage,
+        frame.error,
+        Boolean(authTokenRef.current),
+        tokenOnlyFallbackTriedRef.current,
+      )
+
+      if (shouldFallbackToTokenOnly) {
+        tokenOnlyFallbackRef.current = true
+        tokenOnlyFallbackTriedRef.current = true
+        clearDeviceIdentity()
+        addLog({
+          id: `gateway-token-only-fallback-${Date.now()}`,
+          timestamp: Date.now(),
+          level: 'warn',
+          source: 'gateway',
+          message: 'Gateway rejected cached browser device credentials. Retrying with token-only authentication.',
+        })
+        stopHeartbeat()
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close(4002, 'Retrying with token-only authentication')
+        }
+        return
+      }
+
       const nonRetryable = isNonRetryableGatewayError(rawMessage, frame.error)
 
       addLog({

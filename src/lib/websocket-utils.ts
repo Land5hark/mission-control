@@ -49,6 +49,30 @@ export function isNonRetryableErrorCode(code: string): boolean {
 }
 
 /**
+ * Retry once without browser device identity when a valid gateway auth token
+ * exists but the browser's cached device credentials appear invalid.
+ */
+export function shouldRetryWithoutDeviceIdentity(
+  message: string,
+  error: GatewayErrorDetail | null | undefined,
+  hasAuthToken: boolean,
+  alreadyRetried: boolean,
+): boolean {
+  if (!hasAuthToken || alreadyRetried) return false
+
+  const code = readErrorDetailCode(error)
+  if (code === ConnectErrorDetailCodes.DEVICE_SIGNATURE_INVALID) return true
+
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('device_auth_signature_invalid') ||
+    normalized.includes('device signature invalid') ||
+    normalized.includes('invalid device token') ||
+    normalized.includes('device token invalid')
+  )
+}
+
+/**
  * Calculate exponential backoff delay for reconnect attempts.
  * Uses base * 1.7^attempt, capped at 15000ms.
  * Returns only the deterministic base (without jitter) for testability.

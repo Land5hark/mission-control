@@ -6,6 +6,7 @@ import {
   calculateBackoff,
   detectSequenceGap,
   NON_RETRYABLE_ERROR_CODES,
+  shouldRetryWithoutDeviceIdentity,
 } from '../websocket-utils'
 
 describe('readErrorDetailCode', () => {
@@ -95,6 +96,63 @@ describe('calculateBackoff', () => {
     expect(calculateBackoff(10)).toBe(15000)
     expect(calculateBackoff(20)).toBe(15000)
     expect(calculateBackoff(100)).toBe(15000)
+  })
+})
+
+describe('shouldRetryWithoutDeviceIdentity', () => {
+  it('retries once for DEVICE_SIGNATURE_INVALID when an auth token exists', () => {
+    expect(
+      shouldRetryWithoutDeviceIdentity(
+        'Gateway rejected device signature',
+        { details: { code: 'DEVICE_SIGNATURE_INVALID' } },
+        true,
+        false,
+      ),
+    ).toBe(true)
+  })
+
+  it('retries once for legacy device-signature messages', () => {
+    expect(
+      shouldRetryWithoutDeviceIdentity(
+        'device_auth_signature_invalid',
+        undefined,
+        true,
+        false,
+      ),
+    ).toBe(true)
+  })
+
+  it('does not retry without an auth token', () => {
+    expect(
+      shouldRetryWithoutDeviceIdentity(
+        'device_auth_signature_invalid',
+        undefined,
+        false,
+        false,
+      ),
+    ).toBe(false)
+  })
+
+  it('does not retry more than once', () => {
+    expect(
+      shouldRetryWithoutDeviceIdentity(
+        'device_auth_signature_invalid',
+        undefined,
+        true,
+        true,
+      ),
+    ).toBe(false)
+  })
+
+  it('does not retry for unrelated gateway errors', () => {
+    expect(
+      shouldRetryWithoutDeviceIdentity(
+        'origin not allowed',
+        { details: { code: 'ORIGIN_NOT_ALLOWED' } },
+        true,
+        false,
+      ),
+    ).toBe(false)
   })
 })
 
