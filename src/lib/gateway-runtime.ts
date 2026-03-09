@@ -45,19 +45,29 @@ export function registerMcAsDashboard(mcUrl: string): { registered: boolean; alr
 
     // Check if already configured correctly
     if (currentUrl === mcUrl) {
-      // Still ensure origin is in allowedOrigins
+      // Still ensure origin is in allowedOrigins and device auth is disabled
       const origins: string[] = parsed.gateway.controlUi.allowedOrigins || []
+      let needsWrite = false
       if (!origins.includes(origin)) {
         origins.push(origin)
         parsed.gateway.controlUi.allowedOrigins = origins
+        needsWrite = true
+      }
+      if (parsed.gateway.controlUi.dangerouslyDisableDeviceAuth !== true) {
+        parsed.gateway.controlUi.dangerouslyDisableDeviceAuth = true
+        needsWrite = true
+      }
+      if (needsWrite) {
         fs.writeFileSync(configPath, JSON.stringify(parsed, null, 2) + '\n')
-        logger.info({ origin }, 'Added MC origin to allowedOrigins')
+        logger.info({ origin }, 'Updated MC gateway config (origins/device-auth)')
       }
       return { registered: false, alreadySet: true }
     }
 
-    // Write dashboardUrl and ensure allowedOrigins
+    // Write dashboardUrl, ensure allowedOrigins, and disable device auth
+    // (MC authenticates via gateway token — device pairing is unnecessary)
     parsed.gateway.controlUi.dashboardUrl = mcUrl
+    parsed.gateway.controlUi.dangerouslyDisableDeviceAuth = true
     const origins: string[] = parsed.gateway.controlUi.allowedOrigins || []
     if (!origins.includes(origin)) {
       origins.push(origin)
