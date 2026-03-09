@@ -341,6 +341,9 @@ export interface ExecApprovalRequest {
   toolName: string
   toolArgs: Record<string, any>
   command?: string
+  cwd?: string
+  host?: string
+  resolvedPath?: string
   risk: 'low' | 'medium' | 'high' | 'critical'
   createdAt: number
   expiresAt?: number

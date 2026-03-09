@@ -77,6 +77,7 @@ export function useWebSocket() {
     addNotification,
     updateAgent,
     addExecApproval,
+    updateExecApproval,
   } = useMissionControl()
 
   const isNonRetryableGatewayError = useCallback((message: string): boolean => {
@@ -543,20 +544,24 @@ export function useWebSocket() {
           message: frame.payload?.message || `Fell back from ${frame.payload?.from || '?'} to ${frame.payload?.to || '?'}`,
           created_at: Math.floor(Date.now() / 1000),
         })
-      } else if (frame.event === 'exec.approval') {
-        // Exec approval request from gateway
+      } else if (frame.event === 'exec.approval' || frame.event === 'exec.approval.requested') {
+        // Exec approval request from gateway (supports both event name variants)
         const a = frame.payload
+        const request = a?.request || a // reference UI nests under .request
         if (a?.id) {
           addExecApproval({
             id: a.id,
-            sessionId: a.sessionId || '',
-            agentName: a.agentName,
-            toolName: a.toolName || a.name || 'unknown',
+            sessionId: request?.sessionKey || a.sessionId || '',
+            agentName: request?.agentId || a.agentName,
+            toolName: a.toolName || a.name || request?.command || 'unknown',
             toolArgs: a.args || a.toolArgs || {},
-            command: a.command,
+            command: request?.command || a.command,
+            cwd: request?.cwd || a.cwd,
+            host: request?.host || a.host,
+            resolvedPath: request?.resolvedPath || a.resolvedPath,
             risk: a.risk || 'medium',
-            createdAt: a.createdAt || Date.now(),
-            expiresAt: a.expiresAt,
+            createdAt: a.createdAtMs || a.createdAt || Date.now(),
+            expiresAt: a.expiresAtMs || a.expiresAt,
             status: 'pending',
           })
           addNotification({
@@ -564,9 +569,16 @@ export function useWebSocket() {
             recipient: 'operator',
             type: 'warning',
             title: 'Exec Approval Required',
-            message: `${a.agentName || 'Agent'} wants to run ${a.toolName || a.name || 'tool'}`,
+            message: `${request?.agentId || a.agentName || 'Agent'} wants to run: ${request?.command || a.toolName || a.name || 'tool'}`,
             created_at: Math.floor(Date.now() / 1000),
           })
+        }
+      } else if (frame.event === 'exec.approval.resolved') {
+        // Approval was resolved (by another client or auto-expired)
+        const resolved = frame.payload
+        if (resolved?.id) {
+          const newStatus = resolved.decision === 'deny' ? 'denied' : 'approved'
+          updateExecApproval(resolved.id, { status: newStatus as any })
         }
       }
     }
@@ -584,6 +596,7 @@ export function useWebSocket() {
     isNonRetryableGatewayError,
     getGatewayErrorHelp,
     addExecApproval,
+    updateExecApproval,
   ])
 
   const normalizeWebSocketUrl = useCallback((rawUrl: string): string => {

@@ -45,6 +45,7 @@ import { OpenClawUpdateBanner } from '@/components/layout/openclaw-update-banner
 import { OnboardingWizard } from '@/components/onboarding/onboarding-wizard'
 import { Loader } from '@/components/ui/loader'
 import { ProjectManagerModal } from '@/components/modals/project-manager-modal'
+import { ExecApprovalOverlay } from '@/components/modals/exec-approval-overlay'
 import { useWebSocket } from '@/lib/websocket'
 import { useServerEvents } from '@/lib/use-server-events'
 import { completeNavigationTiming } from '@/lib/navigation-metrics'
@@ -353,6 +354,9 @@ export default function Home() {
 
       {/* Chat panel overlay */}
       <ChatPanel />
+
+      {/* Global exec approval overlay (shown regardless of active panel) */}
+      <ExecApprovalOverlay />
 
       {/* Global Project Manager Modal */}
       {showProjectManagerModal && (

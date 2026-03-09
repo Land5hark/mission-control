@@ -1,20 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
-
-interface ExecApprovalRequest {
-  id: string
-  sessionId: string
-  agentName?: string
-  toolName: string
-  toolArgs: Record<string, any>
-  command?: string
-  risk: 'low' | 'medium' | 'high' | 'critical'
-  createdAt: number
-  expiresAt?: number
-  status: 'pending' | 'approved' | 'denied' | 'expired'
-}
+import { useMissionControl, type ExecApprovalRequest } from '@/store'
+import { useWebSocket } from '@/lib/websocket'
 
 type FilterTab = 'all' | 'pending' | 'resolved'
 
@@ -45,83 +34,52 @@ function timeAgo(timestamp: number): string {
 }
 
 export function ExecApprovalPanel() {
-  const [approvals, setApprovals] = useState<ExecApprovalRequest[]>([])
-  const [loading, setLoading] = useState(true)
+  const { execApprovals, updateExecApproval } = useMissionControl()
+  const { sendMessage } = useWebSocket()
   const [filter, setFilter] = useState<FilterTab>('pending')
-  const [respondingIds, setRespondingIds] = useState<Record<string, string>>({})
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const fetchApprovals = useCallback(async () => {
-    try {
-      const res = await fetch('/api/exec-approvals')
-      if (!res.ok) return
-      const data = await res.json()
-      setApprovals(data.approvals || [])
-    } catch {
-      // silent — gateway may be offline
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchApprovals()
-    intervalRef.current = setInterval(fetchApprovals, 5000)
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
-  }, [fetchApprovals])
-
-  const handleAction = async (id: string, action: 'approve' | 'deny' | 'always_allow') => {
-    setRespondingIds((prev) => ({ ...prev, [id]: action }))
-
-    // Optimistic update
-    const newStatus = action === 'deny' ? 'denied' : 'approved'
-    setApprovals((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: newStatus as ExecApprovalRequest['status'] } : a))
-    )
-
-    try {
-      const res = await fetch('/api/exec-approvals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action }),
-      })
-      if (!res.ok) {
-        // Revert optimistic update on failure
-        setApprovals((prev) =>
-          prev.map((a) => (a.id === id ? { ...a, status: 'pending' } : a))
-        )
-      }
-    } catch {
-      setApprovals((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: 'pending' } : a))
-      )
-    } finally {
-      setRespondingIds((prev) => {
-        const next = { ...prev }
-        delete next[id]
-        return next
-      })
-    }
-  }
-
-  const pendingCount = approvals.filter((a) => a.status === 'pending').length
-
-  const filtered = approvals.filter((a) => {
-    if (filter === 'pending') return a.status === 'pending'
-    if (filter === 'resolved') return a.status !== 'pending'
-    return true
-  })
+  const pendingCount = execApprovals.filter(a => a.status === 'pending').length
 
   // Mark expired approvals client-side
   const now = Date.now()
-  const displayApprovals = filtered.map((a) => {
-    if (a.status === 'pending' && a.expiresAt && a.expiresAt < now) {
-      return { ...a, status: 'expired' as const }
+  const displayApprovals = useMemo(() => {
+    const withExpiry = execApprovals.map(a => {
+      if (a.status === 'pending' && a.expiresAt && a.expiresAt < now) {
+        return { ...a, status: 'expired' as const }
+      }
+      return a
+    })
+
+    return withExpiry.filter(a => {
+      if (filter === 'pending') return a.status === 'pending'
+      if (filter === 'resolved') return a.status !== 'pending'
+      return true
+    })
+  }, [execApprovals, filter, now])
+
+  const handleAction = (id: string, decision: 'allow-once' | 'allow-always' | 'deny') => {
+    // Send via WebSocket RPC
+    const sent = sendMessage({
+      type: 'req',
+      method: 'exec.approval.resolve',
+      id: `ea-${Date.now()}`,
+      params: { id, decision },
+    })
+
+    if (!sent) {
+      // Fallback to HTTP
+      const action = decision === 'deny' ? 'deny' : decision === 'allow-always' ? 'always_allow' : 'approve'
+      fetch('/api/exec-approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action }),
+      }).catch(() => {})
     }
-    return a
-  })
+
+    // Optimistic update
+    const newStatus = decision === 'deny' ? 'denied' : 'approved'
+    updateExecApproval(id, { status: newStatus as ExecApprovalRequest['status'] })
+  }
 
   return (
     <div className="m-4">
@@ -135,14 +93,9 @@ export function ExecApprovalPanel() {
             </span>
           )}
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => { setLoading(true); fetchApprovals() }}
-          disabled={loading}
-        >
-          {loading ? 'Loading...' : 'Refresh'}
-        </Button>
+        <span className="text-xs text-muted-foreground">
+          Real-time via WebSocket
+        </span>
       </div>
 
       {/* Filter tabs */}
@@ -166,7 +119,7 @@ export function ExecApprovalPanel() {
       {displayApprovals.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground text-sm">
           {filter === 'pending'
-            ? 'No pending approvals. Execution requests from agents will appear here.'
+            ? 'No pending approvals. Execution requests from agents will appear here as an overlay.'
             : 'No approvals to display.'}
         </div>
       ) : (
@@ -175,7 +128,6 @@ export function ExecApprovalPanel() {
             <ApprovalCard
               key={approval.id}
               approval={approval}
-              respondingAction={respondingIds[approval.id]}
               onAction={handleAction}
             />
           ))}
@@ -187,12 +139,10 @@ export function ExecApprovalPanel() {
 
 function ApprovalCard({
   approval,
-  respondingAction,
   onAction,
 }: {
   approval: ExecApprovalRequest
-  respondingAction?: string
-  onAction: (id: string, action: 'approve' | 'deny' | 'always_allow') => void
+  onAction: (id: string, decision: 'allow-once' | 'allow-always' | 'deny') => void
 }) {
   const riskBorder = RISK_BORDER[approval.risk]
   const riskBadge = RISK_BADGE[approval.risk]
@@ -221,18 +171,27 @@ function ApprovalCard({
         </div>
       </div>
 
-      {/* Tool args */}
-      {approval.toolArgs && Object.keys(approval.toolArgs).length > 0 && (
-        <pre className="bg-secondary rounded p-2 text-xs font-mono overflow-auto max-h-32 text-foreground mb-2">
-          {JSON.stringify(approval.toolArgs, null, 2)}
-        </pre>
-      )}
-
       {/* Command block */}
       {approval.command && (
         <pre className="bg-secondary rounded p-2 text-xs font-mono overflow-auto max-h-20 text-foreground mb-2 border border-border">
           <code>$ {approval.command}</code>
         </pre>
+      )}
+
+      {/* Tool args */}
+      {!approval.command && approval.toolArgs && Object.keys(approval.toolArgs).length > 0 && (
+        <pre className="bg-secondary rounded p-2 text-xs font-mono overflow-auto max-h-32 text-foreground mb-2">
+          {JSON.stringify(approval.toolArgs, null, 2)}
+        </pre>
+      )}
+
+      {/* Metadata */}
+      {(approval.cwd || approval.host || approval.resolvedPath) && (
+        <div className="text-xs text-muted-foreground mb-2 space-y-0.5">
+          {approval.host && <div>Host: <span className="font-mono text-foreground">{approval.host}</span></div>}
+          {approval.cwd && <div>CWD: <span className="font-mono text-foreground">{approval.cwd}</span></div>}
+          {approval.resolvedPath && <div>Resolved: <span className="font-mono text-foreground">{approval.resolvedPath}</span></div>}
+        </div>
       )}
 
       {/* Action row */}
@@ -242,26 +201,23 @@ function ApprovalCard({
             <Button
               size="sm"
               className="bg-green-600 hover:bg-green-700 text-white"
-              disabled={!!respondingAction}
-              onClick={() => onAction(approval.id, 'approve')}
+              onClick={() => onAction(approval.id, 'allow-once')}
             >
-              {respondingAction === 'approve' ? 'Approving...' : 'Approve'}
+              Allow once
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onAction(approval.id, 'allow-always')}
+            >
+              Always allow
             </Button>
             <Button
               size="sm"
               className="bg-red-600 hover:bg-red-700 text-white"
-              disabled={!!respondingAction}
               onClick={() => onAction(approval.id, 'deny')}
             >
-              {respondingAction === 'deny' ? 'Denying...' : 'Deny'}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={!!respondingAction}
-              onClick={() => onAction(approval.id, 'always_allow')}
-            >
-              {respondingAction === 'always_allow' ? 'Saving...' : 'Always Allow'}
+              Deny
             </Button>
           </>
         ) : isExpired ? (
