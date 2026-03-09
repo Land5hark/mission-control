@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import { config } from '@/lib/config'
+import { logger } from '@/lib/logger'
 
 interface OpenClawGatewayConfig {
   gateway?: {
@@ -7,6 +8,10 @@ interface OpenClawGatewayConfig {
       token?: string
     }
     port?: number
+    controlUi?: {
+      dashboardUrl?: string
+      allowedOrigins?: string[]
+    }
   }
 }
 
@@ -18,6 +23,53 @@ function readOpenClawConfig(): OpenClawGatewayConfig | null {
     return JSON.parse(raw) as OpenClawGatewayConfig
   } catch {
     return null
+  }
+}
+
+export function registerMcAsDashboard(mcUrl: string): { registered: boolean; alreadySet: boolean } {
+  const configPath = config.openclawConfigPath
+  if (!configPath || !fs.existsSync(configPath)) {
+    return { registered: false, alreadySet: false }
+  }
+
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8')
+    const parsed = JSON.parse(raw) as Record<string, any>
+
+    // Ensure nested structure
+    if (!parsed.gateway) parsed.gateway = {}
+    if (!parsed.gateway.controlUi) parsed.gateway.controlUi = {}
+
+    const currentUrl = parsed.gateway.controlUi.dashboardUrl
+    const origin = new URL(mcUrl).origin
+
+    // Check if already configured correctly
+    if (currentUrl === mcUrl) {
+      // Still ensure origin is in allowedOrigins
+      const origins: string[] = parsed.gateway.controlUi.allowedOrigins || []
+      if (!origins.includes(origin)) {
+        origins.push(origin)
+        parsed.gateway.controlUi.allowedOrigins = origins
+        fs.writeFileSync(configPath, JSON.stringify(parsed, null, 2) + '\n')
+        logger.info({ origin }, 'Added MC origin to allowedOrigins')
+      }
+      return { registered: false, alreadySet: true }
+    }
+
+    // Write dashboardUrl and ensure allowedOrigins
+    parsed.gateway.controlUi.dashboardUrl = mcUrl
+    const origins: string[] = parsed.gateway.controlUi.allowedOrigins || []
+    if (!origins.includes(origin)) {
+      origins.push(origin)
+    }
+    parsed.gateway.controlUi.allowedOrigins = origins
+
+    fs.writeFileSync(configPath, JSON.stringify(parsed, null, 2) + '\n')
+    logger.info({ mcUrl, origin }, 'Registered MC as default dashboard')
+    return { registered: true, alreadySet: false }
+  } catch (err) {
+    logger.error({ err }, 'Failed to register MC as dashboard')
+    return { registered: false, alreadySet: false }
   }
 }
 

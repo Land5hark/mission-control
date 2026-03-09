@@ -24,18 +24,35 @@ interface DiagSecurityCheck {
   detail: string
 }
 
+interface DashboardRegistration {
+  registered: boolean
+  alreadySet: boolean
+}
+
 interface SystemCapabilities {
   claudeSessions: number
   agentCount: number
   gatewayConnected: boolean
   hasSkills: boolean
+  dashboardRegistration: DashboardRegistration | null
 }
 
-const STEPS = [
+const BASE_STEPS = [
   { id: 'welcome', title: 'Welcome' },
   { id: 'interface-mode', title: 'Interface' },
   { id: 'credentials', title: 'Credentials' },
 ]
+
+const GATEWAY_STEPS = [
+  { id: 'welcome', title: 'Welcome' },
+  { id: 'interface-mode', title: 'Interface' },
+  { id: 'gateway-link', title: 'Gateway' },
+  { id: 'credentials', title: 'Credentials' },
+]
+
+function getSteps(gatewayConnected: boolean) {
+  return gatewayConnected ? GATEWAY_STEPS : BASE_STEPS
+}
 
 /** Mode-aware Tailwind classes — local=amber, gateway=cyan */
 function modeColors(isGateway: boolean) {
@@ -59,6 +76,7 @@ export function OnboardingWizard() {
     agentCount: 0,
     gatewayConnected: false,
     hasSkills: false,
+    dashboardRegistration: null,
   })
 
   useEffect(() => {
@@ -85,12 +103,16 @@ export function OnboardingWizard() {
         gatewayConnected: statusData?.gateway ?? false,
         agentCount: agentsData?.total ?? 0,
         hasSkills: false,
+        dashboardRegistration: statusData?.dashboardRegistration ?? null,
       })
     })
   }, [showOnboarding])
 
+  const STEPS = getSteps(capabilities.gatewayConnected)
+  const credentialsStepIndex = STEPS.findIndex(s => s.id === 'credentials')
+
   useEffect(() => {
-    if (step !== 2 || credentialStatus) return
+    if (step !== credentialsStepIndex || credentialStatus) return
     fetch('/api/diagnostics')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -102,7 +124,7 @@ export function OnboardingWizard() {
         }
       })
       .catch(() => {})
-  }, [step, credentialStatus])
+  }, [step, credentialStatus, credentialsStepIndex])
 
   const completeStep = useCallback(async (stepId: string) => {
     await fetch('/api/onboarding', {
@@ -207,13 +229,16 @@ export function OnboardingWizard() {
               <p className="text-sm text-muted-foreground">Your station is ready for agents.</p>
             </div>
           )}
-          {step === 0 && (
+          {STEPS[step]?.id === 'welcome' && (
             <StepWelcome isGateway={isGateway} capabilities={capabilities} onNext={goNext} onSkip={skip} />
           )}
-          {step === 1 && (
+          {STEPS[step]?.id === 'interface-mode' && (
             <StepInterfaceMode isGateway={isGateway} onNext={goNext} onBack={goBack} />
           )}
-          {step === 2 && (
+          {STEPS[step]?.id === 'gateway-link' && (
+            <StepGatewayLink isGateway={isGateway} registration={capabilities.dashboardRegistration} onNext={goNext} onBack={goBack} />
+          )}
+          {STEPS[step]?.id === 'credentials' && (
             <StepCredentials isGateway={isGateway} status={credentialStatus} onFinish={finish} onBack={goBack} navigateToPanel={navigateToPanel} onClose={() => setShowOnboarding(false)} />
           )}
         </div>
@@ -263,6 +288,16 @@ function StepWelcome({ isGateway, capabilities, onNext, onSkip }: {
               ? `${capabilities.agentCount} agent${capabilities.agentCount !== 1 ? 's' : ''} registered`
               : 'No agents yet'}
           />
+          {capabilities.gatewayConnected && capabilities.dashboardRegistration && (
+            <StatusChip
+              ok={capabilities.dashboardRegistration.registered || capabilities.dashboardRegistration.alreadySet}
+              label={
+                (capabilities.dashboardRegistration.registered || capabilities.dashboardRegistration.alreadySet)
+                  ? 'Default dashboard: Mission Control'
+                  : 'Dashboard registration pending'
+              }
+            />
+          )}
         </div>
 
         {/* Mode cards — both visible, detected mode highlighted */}
@@ -423,6 +458,102 @@ function StepInterfaceMode({ isGateway, onNext, onBack }: {
               <li>All station systems unlocked</li>
             </ul>
           </button>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between pt-4 border-t border-border/30">
+        <Button variant="ghost" size="sm" onClick={onBack} className="text-xs text-muted-foreground">Back</Button>
+        <Button onClick={onNext} size="sm" className={`${mc.bgBtn} ${mc.text} border ${mc.border} ${mc.hoverBg}`}>
+          Continue
+        </Button>
+      </div>
+    </>
+  )
+}
+
+function StepGatewayLink({ isGateway, registration, onNext, onBack }: {
+  isGateway: boolean
+  registration: DashboardRegistration | null
+  onNext: () => void
+  onBack: () => void
+}) {
+  const mc = modeColors(isGateway)
+  const [healthOk, setHealthOk] = useState<boolean | null>(null)
+  const [testing, setTesting] = useState(false)
+
+  const testConnection = async () => {
+    setTesting(true)
+    try {
+      const res = await fetch('/api/gateways/health')
+      setHealthOk(res.ok)
+    } catch {
+      setHealthOk(false)
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const configured = registration?.registered || registration?.alreadySet
+
+  return (
+    <>
+      <div className="flex-1">
+        <h2 className="text-lg font-semibold mb-1">Gateway Link</h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Mission Control registers itself as the default dashboard for your OpenClaw gateway.
+          When you run <code className="text-xs bg-surface-1 px-1 py-0.5 rounded">openclaw dashboard</code>, it will open Mission Control.
+        </p>
+
+        <div className="space-y-3">
+          <div className={`flex items-start gap-3 p-3 rounded-lg border ${
+            configured ? 'border-green-400/20 bg-green-400/5' : 'border-amber-400/20 bg-amber-400/5'
+          }`}>
+            <span className={`font-mono text-sm mt-0.5 ${configured ? 'text-green-400' : 'text-amber-400'}`}>
+              [{configured ? '+' : '~'}]
+            </span>
+            <div>
+              <p className="text-sm font-medium">Dashboard URL</p>
+              <p className="text-xs text-muted-foreground">
+                {configured
+                  ? 'Configured — openclaw.json updated with Mission Control URL'
+                  : 'Registration pending — will be written on next capabilities check'}
+              </p>
+            </div>
+          </div>
+
+          <div className={`flex items-start gap-3 p-3 rounded-lg border ${
+            configured ? 'border-green-400/20 bg-green-400/5' : 'border-border/20 bg-surface-1/30'
+          }`}>
+            <span className={`font-mono text-sm mt-0.5 ${configured ? 'text-green-400' : 'text-muted-foreground'}`}>
+              [{configured ? '+' : '-'}]
+            </span>
+            <div>
+              <p className="text-sm font-medium">Allowed Origins</p>
+              <p className="text-xs text-muted-foreground">
+                {configured
+                  ? 'Mission Control origin added to gateway allowedOrigins'
+                  : 'Will be configured alongside dashboard URL'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={testConnection}
+              disabled={testing}
+            >
+              {testing ? 'Testing...' : 'Test Connection'}
+            </Button>
+            {healthOk === true && (
+              <span className="text-xs text-green-400">Gateway reachable</span>
+            )}
+            {healthOk === false && (
+              <span className="text-xs text-red-400">Gateway unreachable</span>
+            )}
+          </div>
         </div>
       </div>
 

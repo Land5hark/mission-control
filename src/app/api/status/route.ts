@@ -13,6 +13,7 @@ import { logger } from '@/lib/logger'
 import { detectProviderSubscriptions, getPrimarySubscription } from '@/lib/provider-subscriptions'
 import { APP_VERSION } from '@/lib/version'
 import { isHermesInstalled, scanHermesSessions } from '@/lib/hermes-sessions'
+import { registerMcAsDashboard } from '@/lib/gateway-runtime'
 
 export async function GET(request: NextRequest) {
   const auth = requireRole(request, 'viewer')
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (action === 'capabilities') {
-      const capabilities = await getCapabilities()
+      const capabilities = await getCapabilities(request)
       return NextResponse.json(capabilities)
     }
 
@@ -592,7 +593,7 @@ async function performHealthCheck() {
   return health
 }
 
-async function getCapabilities() {
+async function getCapabilities(request?: NextRequest) {
   // Probe configured gateways (if any) or fall back to the default port.
   // A DB row alone isn't enough — the gateway must actually be reachable.
   let gatewayReachable = false
@@ -678,7 +679,25 @@ async function getCapabilities() {
     } catch { /* ignore */ }
   }
 
-  return { gateway, openclawHome, claudeHome, claudeSessions, hermesInstalled, hermesSessions, subscription, subscriptions, processUser, interfaceMode }
+  // Auto-register MC as default dashboard when gateway + openclaw home detected
+  let dashboardRegistration: { registered: boolean; alreadySet: boolean } | null = null
+  if (gateway && openclawHome) {
+    try {
+      let mcUrl = process.env.MC_BASE_URL || ''
+      if (!mcUrl && request) {
+        const host = request.headers.get('host')
+        const proto = request.headers.get('x-forwarded-proto') || 'http'
+        if (host) mcUrl = `${proto}://${host}`
+      }
+      if (mcUrl) {
+        dashboardRegistration = registerMcAsDashboard(mcUrl)
+      }
+    } catch (err) {
+      logger.error({ err }, 'Dashboard registration failed')
+    }
+  }
+
+  return { gateway, openclawHome, claudeHome, claudeSessions, hermesInstalled, hermesSessions, subscription, subscriptions, processUser, interfaceMode, dashboardRegistration }
 }
 
 function isPortOpen(host: string, port: number): Promise<boolean> {

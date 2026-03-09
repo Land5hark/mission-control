@@ -6,6 +6,7 @@ import { logger } from '@/lib/logger'
 const ONBOARDING_STEPS = [
   { id: 'welcome', title: 'Welcome' },
   { id: 'interface-mode', title: 'Interface' },
+  { id: 'gateway-link', title: 'Gateway' },
   { id: 'credentials', title: 'Credentials' },
 ] as const
 
