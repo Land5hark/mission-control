@@ -56,21 +56,38 @@ export async function POST(request: NextRequest) {
     ensureDirExists(BACKUP_DIR)
     const ipAddress = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
     try {
-      const { stdout } = await runOpenClaw(['backup', 'create', '--output', BACKUP_DIR], { timeoutMs: 60000 })
+      let stdout: string
+      let stderr: string
+      try {
+        const result = await runOpenClaw(['backup', 'create', '--output', BACKUP_DIR], { timeoutMs: 60000 })
+        stdout = result.stdout
+        stderr = result.stderr
+      } catch (error: any) {
+        // openclaw backup may exit non-zero despite success — check output
+        stdout = error.stdout || ''
+        stderr = error.stderr || ''
+        const combined = `${stdout}\n${stderr}`
+        if (!combined.includes('Created')) {
+          const message = stderr || error.message || 'Unknown error'
+          logger.error({ err: error }, 'Gateway backup failed')
+          return NextResponse.json({ error: `Gateway backup failed: ${message}` }, { status: 500 })
+        }
+      }
+
+      const output = (stdout || stderr).trim()
 
       logAuditEvent({
         action: 'openclaw.backup',
         actor: auth.user.username,
         actor_id: auth.user.id,
-        detail: { output: stdout.trim() },
+        detail: { output },
         ip_address: ipAddress,
       })
 
-      return NextResponse.json({ success: true, output: stdout.trim() })
+      return NextResponse.json({ success: true, output })
     } catch (error: any) {
-      const message = error.stderr || error.message || 'Unknown error'
       logger.error({ err: error }, 'Gateway backup failed')
-      return NextResponse.json({ error: `Gateway backup failed: ${message}` }, { status: 500 })
+      return NextResponse.json({ error: `Gateway backup failed: ${error.message}` }, { status: 500 })
     }
   }
 
