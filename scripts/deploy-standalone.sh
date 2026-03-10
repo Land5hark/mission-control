@@ -11,12 +11,54 @@ LISTEN_HOST="${MC_HOSTNAME:-0.0.0.0}"
 LOG_PATH="${LOG_PATH:-/tmp/mc.log}"
 VERIFY_HOST="${VERIFY_HOST:-127.0.0.1}"
 PID_FILE="${PID_FILE:-$PROJECT_ROOT/.next/standalone/server.pid}"
+SOURCE_DATA_DIR="$PROJECT_ROOT/.data"
+
+load_env() {
+  set -a
+  if [[ -f .env ]]; then
+    # shellcheck disable=SC1091
+    source .env
+  fi
+  if [[ -f .env.local ]]; then
+    # shellcheck disable=SC1091
+    source .env.local
+  fi
+  set +a
+}
+
+migrate_runtime_data_dir() {
+  local target_data_dir="${MISSION_CONTROL_DATA_DIR:-$SOURCE_DATA_DIR}"
+
+  if [[ "$target_data_dir" == "$SOURCE_DATA_DIR" ]]; then
+    return
+  fi
+
+  mkdir -p "$target_data_dir"
+
+  local source_db="$SOURCE_DATA_DIR/mission-control.db"
+  local target_db="$target_data_dir/mission-control.db"
+
+  if [[ -s "$target_db" || ! -s "$source_db" ]]; then
+    return
+  fi
+
+  echo "==> migrating runtime data to $target_data_dir"
+  rsync -a \
+    --exclude 'mission-control.db-shm' \
+    --exclude 'mission-control.db-wal' \
+    --exclude '*.db-shm' \
+    --exclude '*.db-wal' \
+    "$SOURCE_DATA_DIR"/ "$target_data_dir"/
+}
 
 cd "$PROJECT_ROOT"
 
 echo "==> fetching branch $BRANCH"
 git fetch origin "$BRANCH"
 git merge --ff-only FETCH_HEAD
+
+load_env
+migrate_runtime_data_dir
 
 echo "==> installing dependencies"
 pnpm install --frozen-lockfile
@@ -40,16 +82,7 @@ if [[ -n "${existing_pid:-}" ]]; then
 fi
 
 echo "==> starting standalone server"
-set -a
-if [[ -f .env ]]; then
-  # shellcheck disable=SC1091
-  source .env
-fi
-if [[ -f .env.local ]]; then
-  # shellcheck disable=SC1091
-  source .env.local
-fi
-set +a
+load_env
 
 PORT="$PORT" HOSTNAME="$LISTEN_HOST" nohup bash "$PROJECT_ROOT/scripts/start-standalone.sh" >"$LOG_PATH" 2>&1 &
 new_pid=$!

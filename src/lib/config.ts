@@ -9,6 +9,7 @@ function clampInt(value: number, min: number, max: number, fallback: number): nu
 }
 
 const defaultDataDir = path.join(process.cwd(), '.data')
+const resolvedDataDir = process.env.MISSION_CONTROL_DATA_DIR || defaultDataDir
 const defaultOpenClawStateDir = path.join(os.homedir(), '.openclaw')
 const explicitOpenClawConfigPath =
   process.env.OPENCLAW_CONFIG_PATH ||
@@ -49,13 +50,13 @@ export const config = {
   claudeHome:
     process.env.MC_CLAUDE_HOME ||
     path.join(os.homedir(), '.claude'),
-  dataDir: process.env.MISSION_CONTROL_DATA_DIR || defaultDataDir,
+  dataDir: resolvedDataDir,
   dbPath:
     process.env.MISSION_CONTROL_DB_PATH ||
-    path.join(defaultDataDir, 'mission-control.db'),
+    path.join(resolvedDataDir, 'mission-control.db'),
   tokensPath:
     process.env.MISSION_CONTROL_TOKENS_PATH ||
-    path.join(defaultDataDir, 'mission-control-tokens.json'),
+    path.join(resolvedDataDir, 'mission-control-tokens.json'),
   // Keep openclawHome as a legacy alias for existing code paths.
   openclawHome: openclawStateDir,
   openclawStateDir,
