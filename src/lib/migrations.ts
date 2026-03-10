@@ -1218,6 +1218,33 @@ const migrations: Migration[] = [
         db.exec(`ALTER TABLE token_usage ADD COLUMN task_id INTEGER`)
       }
     }
+  },
+  {
+    id: '040_agent_api_keys',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_api_keys (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          agent_id INTEGER NOT NULL,
+          workspace_id INTEGER NOT NULL DEFAULT 1,
+          name TEXT NOT NULL,
+          key_hash TEXT NOT NULL,
+          key_prefix TEXT NOT NULL,
+          scopes TEXT NOT NULL DEFAULT '[]',
+          expires_at INTEGER,
+          revoked_at INTEGER,
+          last_used_at INTEGER,
+          created_by TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(workspace_id, key_hash)
+        )
+      `)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_api_keys_agent_id ON agent_api_keys(agent_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_api_keys_workspace_id ON agent_api_keys(workspace_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_api_keys_expires_at ON agent_api_keys(expires_at)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_api_keys_revoked_at ON agent_api_keys(revoked_at)`)
+    }
   }
 ]
 

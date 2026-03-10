@@ -305,7 +305,11 @@ export async function POST(request: NextRequest) {
     const workspaceId = auth.user.workspace_id ?? 1
     const body = await request.json()
 
-    const from = auth.user.display_name || auth.user.username || 'system'
+    const requestedFrom = typeof body.from === 'string' ? body.from.trim() : ''
+    const isCoordinatorOverride = requestedFrom.toLowerCase() === COORDINATOR_AGENT.toLowerCase()
+    const from = isCoordinatorOverride
+      ? COORDINATOR_AGENT
+      : (auth.user.display_name || auth.user.username || 'system')
     const to = body.to ? (body.to as string).trim() : null
     const content = (body.content || '').trim()
     const message_type = body.message_type || 'text'

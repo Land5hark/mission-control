@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import { getDatabase } from './db'
 import { hashPassword, verifyPassword } from './password'
 import { logSecurityEvent } from './security-events'
@@ -371,6 +371,58 @@ export function getUserFromRequest(request: Request): User | null {
     }
   }
 
+  // Agent-scoped API keys
+  if (apiKey) {
+    try {
+      const db = getDatabase()
+      const keyHash = hashApiKey(apiKey)
+      const now = Math.floor(Date.now() / 1000)
+      const row = db.prepare(`
+        SELECT id, agent_id, workspace_id, scopes, expires_at, revoked_at
+        FROM agent_api_keys
+        WHERE key_hash = ?
+        LIMIT 1
+      `).get(keyHash) as {
+        id: number
+        agent_id: number
+        workspace_id: number
+        scopes: string
+        expires_at: number | null
+        revoked_at: number | null
+      } | undefined
+
+      if (row && !row.revoked_at && (!row.expires_at || row.expires_at > now)) {
+        const scopes = parseAgentScopes(row.scopes)
+        const agent = db
+          .prepare('SELECT id, name FROM agents WHERE id = ? AND workspace_id = ?')
+          .get(row.agent_id, row.workspace_id) as { id: number; name: string } | undefined
+
+        if (agent) {
+          if (agentName && agentName !== agent.name && !scopes.has('admin')) {
+            return null
+          }
+
+          db.prepare('UPDATE agent_api_keys SET last_used_at = ?, updated_at = ? WHERE id = ?').run(now, now, row.id)
+
+          return {
+            id: -row.id,
+            username: `agent:${agent.name}`,
+            display_name: agent.name,
+            role: deriveRoleFromScopes(scopes),
+            workspace_id: row.workspace_id,
+            tenant_id: getDefaultWorkspaceContext().tenantId,
+            created_at: 0,
+            updated_at: now,
+            last_login_at: now,
+            agent_name: agent.name,
+          }
+        }
+      }
+    } catch {
+      // ignore missing table / startup race
+    }
+  }
+
   // Plugin hook: allow Pro (or other extensions) to resolve custom API keys
   if (apiKey && _authResolverHook) {
     const resolved = _authResolverHook(apiKey, agentName)
@@ -412,6 +464,26 @@ function extractApiKeyFromHeaders(headers: Headers): string | null {
   }
 
   return null
+}
+
+function hashApiKey(rawKey: string): string {
+  return createHash('sha256').update(rawKey).digest('hex')
+}
+
+function parseAgentScopes(raw: string): Set<string> {
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return new Set(parsed.map((scope) => String(scope)))
+  } catch {
+    // ignore parse errors
+  }
+  return new Set()
+}
+
+function deriveRoleFromScopes(scopes: Set<string>): User['role'] {
+  if (scopes.has('admin')) return 'admin'
+  if (scopes.has('operator')) return 'operator'
+  return 'viewer'
 }
 
 /**

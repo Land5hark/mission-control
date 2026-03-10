@@ -109,7 +109,8 @@ export async function POST(
 
     const result = await validateBody(request, createCommentSchema);
     if ('error' in result) return result.error;
-    const { content: rawContent, author = 'system', parent_id } = result.data;
+    const { content: rawContent, parent_id } = result.data;
+    const author = auth.user.display_name || auth.user.username || 'system';
 
     // Normalize agent payload JSON — extract text from OpenClaw result format
     let content = rawContent;

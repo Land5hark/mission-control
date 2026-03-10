@@ -133,7 +133,12 @@ export function proxy(request: NextRequest) {
     const configuredApiKey = (process.env.API_KEY || '').trim()
     const apiKey = extractApiKeyFromRequest(request)
     const hasValidApiKey = Boolean(configuredApiKey && apiKey && safeCompare(apiKey, configuredApiKey))
-    if (sessionToken || hasValidApiKey) {
+
+    // Agent-scoped keys are validated in route auth (DB-backed) and should be
+    // allowed to pass through proxy auth gate.
+    const looksLikeAgentApiKey = /^mca_[a-f0-9]{48}$/i.test(apiKey)
+
+    if (sessionToken || hasValidApiKey || looksLikeAgentApiKey) {
       return addSecurityHeaders(NextResponse.next(), request)
     }
 
