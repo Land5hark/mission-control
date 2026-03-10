@@ -5,12 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Loader } from '@/components/ui/loader'
 import { useMissionControl } from '@/store'
 import { createClientLogger } from '@/lib/client-logger'
-import dynamic from 'next/dynamic'
-
-const MemoryGraph = dynamic(
-  () => import('./memory-graph').then((m) => ({ default: m.MemoryGraph })),
-  { ssr: false }
-)
+import { MemoryGraph } from './memory-graph'
 
 const log = createClientLogger('MemoryBrowser')
 

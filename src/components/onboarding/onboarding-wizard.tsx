@@ -7,6 +7,7 @@ import { Loader } from '@/components/ui/loader'
 import { useMissionControl } from '@/store'
 import { useNavigateToPanel } from '@/lib/navigation'
 import { clampWizardStep, getWizardSteps, stepIdAt } from '@/lib/onboarding-flow'
+import { SecurityScanCard } from '@/components/onboarding/security-scan-card'
 
 interface StepInfo {
   id: string
@@ -660,6 +661,18 @@ function StepCredentials({
                 Open Settings
               </Button>
             )}
+
+            <div className="pt-2">
+              <div className="mb-2">
+                <p className="text-sm font-medium">Security Scan</p>
+                <p className="text-xs text-muted-foreground">
+                  Verify network, runtime, and OpenClaw hardening before you launch the station.
+                </p>
+              </div>
+              <div className="rounded-lg border border-border/40 bg-surface-1/40 p-3">
+                <SecurityScanCard compact autoScan />
+              </div>
+            </div>
           </div>
         )}
       </div>
