@@ -1,6 +1,7 @@
 'use client'
 
 import Image from 'next/image'
+import { useEffect } from 'react'
 import { APP_VERSION } from '@/lib/version'
 
 interface InitStep {
@@ -46,6 +47,11 @@ const LOADER_AGENTS = [
   },
 ] as const
 
+const LOADER_IMAGE_SOURCES = [
+  ...LOADER_AGENTS.map((agent) => agent.src),
+  '/brand/mc-logo-128.png',
+] as const
+
 function LoaderDots({ size = 'md' }: { size?: 'sm' | 'md' }) {
   const dotSize = size === 'sm' ? 'w-1 h-1' : 'w-1.5 h-1.5'
   return (
@@ -58,6 +64,31 @@ function LoaderDots({ size = 'md' }: { size?: 'sm' | 'md' }) {
 }
 
 function PageLoader({ steps }: { steps?: InitStep[] }) {
+  useEffect(() => {
+    const createdLinks: HTMLLinkElement[] = []
+
+    for (const href of LOADER_IMAGE_SOURCES) {
+      const existing = document.head.querySelector(`link[rel="preload"][href="${href}"]`)
+      if (!existing) {
+        const link = document.createElement('link')
+        link.rel = 'preload'
+        link.as = 'image'
+        link.href = href
+        document.head.appendChild(link)
+        createdLinks.push(link)
+      }
+
+      const img = new window.Image()
+      img.src = href
+    }
+
+    return () => {
+      for (const link of createdLinks) {
+        link.remove()
+      }
+    }
+  }, [])
+
   const doneCount = steps?.filter(s => s.status === 'done').length ?? 0
   const totalCount = steps?.length ?? 1
   const progress = steps ? (doneCount / totalCount) * 100 : 0
@@ -109,6 +140,8 @@ function PageLoader({ steps }: { steps?: InitStep[] }) {
                 alt="Mission Control"
                 width={56}
                 height={56}
+                priority
+                fetchPriority="high"
                 className="w-14 h-14"
               />
             </div>

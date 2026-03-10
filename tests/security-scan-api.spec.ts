@@ -178,4 +178,21 @@ test.describe('Security Scan Agent Endpoint', () => {
     expect(typeof body.fixes.requiresRestart).toBe('boolean')
     expect(Array.isArray(body.fixes.requiresManual)).toBe(true)
   })
+
+  test('POST /api/security-scan/fix reports remaining manual issues explicitly', async ({ request }) => {
+    const res = await request.post('/api/security-scan/fix', {
+      headers: { ...API_KEY_HEADER, 'Content-Type': 'application/json' },
+      data: {},
+    })
+    expect(res.status()).toBe(200)
+    const body = await res.json()
+
+    expect(body).toHaveProperty('attempted')
+    expect(body).toHaveProperty('fixed')
+    expect(body).toHaveProperty('failed')
+    expect(body).toHaveProperty('remaining')
+    expect(body).toHaveProperty('remainingAutoFixable')
+    expect(body).toHaveProperty('remainingManual')
+    expect(typeof body.note).toBe('string')
+  })
 })

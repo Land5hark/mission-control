@@ -52,6 +52,7 @@ export const FIX_SAFETY: Record<string, FixSafety> = {
   hsts_enabled: 'requires-restart',
   cookie_secure: 'requires-restart',
   allowed_hosts: 'requires-restart',
+  rate_limiting: 'requires-restart',
   api_key_set: 'requires-restart',
   log_redaction: 'requires-restart',
   dm_isolation: 'requires-restart',

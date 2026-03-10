@@ -7,7 +7,7 @@ import { requireRole } from '@/lib/auth'
 import { config } from '@/lib/config'
 import { getDatabase } from '@/lib/db'
 import { logger } from '@/lib/logger'
-import { FIX_SAFETY, type FixSafety } from '@/lib/security-scan'
+import { FIX_SAFETY, runSecurityScan, type FixSafety } from '@/lib/security-scan'
 
 export interface FixResult {
   id: string
@@ -15,6 +15,12 @@ export interface FixResult {
   fixed: boolean
   detail: string
   fixSafety?: FixSafety
+}
+
+function getFailingChecks() {
+  return Object.values(runSecurityScan().categories)
+    .flatMap((category) => category.checks)
+    .filter((check) => check.status !== 'pass')
 }
 
 export async function POST(request: NextRequest) {
@@ -48,6 +54,17 @@ export async function POST(request: NextRequest) {
       content = content.trimEnd() + `\n${key}=${value}\n`
     }
     writeFileSync(envPath, content, 'utf-8')
+    process.env[key] = value
+  }
+
+  function unsetEnvVar(key: string) {
+    let content = readEnv()
+    const regex = new RegExp(`^${key}=.*\n?`, 'm')
+    if (regex.test(content)) {
+      content = content.replace(regex, '')
+      writeFileSync(envPath, content, 'utf-8')
+    }
+    delete process.env[key]
   }
 
   // 1. Fix .env file permissions
@@ -72,9 +89,7 @@ export async function POST(request: NextRequest) {
   if (shouldFix('allowed_hosts') && (!allowedHosts || allowAny === '1' || allowAny === 'true')) {
     try {
       if (allowAny) {
-        let content = readEnv()
-        content = content.replace(/^MC_ALLOW_ANY_HOST=.*\n?/m, '')
-        writeFileSync(envPath, content, 'utf-8')
+        unsetEnvVar('MC_ALLOW_ANY_HOST')
       }
       setEnvVar('MC_ALLOWED_HOSTS', 'localhost,127.0.0.1')
       results.push({ id: 'allowed_hosts', name: 'Host allowlist', fixed: true, detail: 'Set MC_ALLOWED_HOSTS=localhost,127.0.0.1', fixSafety: FIX_SAFETY['allowed_hosts'] })
@@ -101,6 +116,17 @@ export async function POST(request: NextRequest) {
       results.push({ id: 'cookie_secure', name: 'Secure cookies', fixed: true, detail: 'Set MC_COOKIE_SECURE=1', fixSafety: FIX_SAFETY['cookie_secure'] })
     } catch (e: any) {
       results.push({ id: 'cookie_secure', name: 'Secure cookies', fixed: false, detail: e.message, fixSafety: FIX_SAFETY['cookie_secure'] })
+    }
+  }
+
+  // 4b. Re-enable runtime rate limiting
+  const rateLimitDisabled = process.env.MC_DISABLE_RATE_LIMIT
+  if (shouldFix('rate_limiting') && rateLimitDisabled) {
+    try {
+      unsetEnvVar('MC_DISABLE_RATE_LIMIT')
+      results.push({ id: 'rate_limiting', name: 'Rate limiting active', fixed: true, detail: 'Removed MC_DISABLE_RATE_LIMIT', fixSafety: FIX_SAFETY['rate_limiting'] })
+    } catch (e: any) {
+      results.push({ id: 'rate_limiting', name: 'Rate limiting active', fixed: false, detail: e.message, fixSafety: FIX_SAFETY['rate_limiting'] })
     }
   }
 
@@ -272,13 +298,22 @@ export async function POST(request: NextRequest) {
 
   const fixed = results.filter(r => r.fixed).length
   const failed = results.filter(r => !r.fixed).length
+  const remainingChecks = getFailingChecks()
+  const remainingAutoFixable = remainingChecks.filter((check) => check.id in FIX_SAFETY).length
+  const remainingManual = remainingChecks.length - remainingAutoFixable
 
   logger.info({ fixed, failed, actor: auth.user.username }, 'Security auto-fix completed')
 
   return NextResponse.json({
+    attempted: results.length,
     fixed,
     failed,
+    remaining: remainingChecks.length,
+    remainingAutoFixable,
+    remainingManual,
     results,
-    note: 'Some fixes (e.g. env var changes) require a server restart to take effect.',
+    note: remainingChecks.length > 0
+      ? 'Some issues require manual action or additional review. Environment-backed fixes may still require a server restart to fully apply.'
+      : 'All currently detected auto-fixable issues have been resolved. Restart the server if you changed environment-backed settings.',
   })
 }

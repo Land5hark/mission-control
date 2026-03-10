@@ -39,7 +39,7 @@ interface ScanResult {
 const FIX_SAFETY: Record<string, FixSafety> = {
   env_permissions: 'safe', config_permissions: 'safe', world_writable: 'safe',
   hsts_enabled: 'requires-restart', cookie_secure: 'requires-restart',
-  allowed_hosts: 'requires-restart', api_key_set: 'requires-restart',
+  allowed_hosts: 'requires-restart', rate_limiting: 'requires-restart', api_key_set: 'requires-restart',
   log_redaction: 'requires-restart', dm_isolation: 'requires-restart',
   fs_workspace_only: 'requires-restart',
   exec_restricted: 'requires-review', gateway_auth: 'requires-review',
@@ -90,7 +90,15 @@ export function SecurityScanCard({ compact = false, autoScan = false }: { compac
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null)
   const [copiedFix, setCopiedFix] = useState<string | null>(null)
   const [fixing, setFixing] = useState<string | null>(null) // 'all' or a check id
-  const [fixResult, setFixResult] = useState<{ fixed: number; failed: number; note?: string } | null>(null)
+  const [fixResult, setFixResult] = useState<{
+    attempted: number
+    fixed: number
+    failed: number
+    remaining: number
+    remainingAutoFixable: number
+    remainingManual: number
+    note?: string
+  } | null>(null)
 
   const copyFix = useCallback(async (fix: string, checkId: string) => {
     try {
@@ -139,15 +147,23 @@ export function SecurityScanCard({ compact = false, autoScan = false }: { compac
         body: ids ? JSON.stringify({ ids }) : '{}',
       })
       if (!res.ok) {
-        setFixResult({ fixed: 0, failed: 1, note: res.status === 401 ? 'Admin access required' : 'Fix failed' })
+        setFixResult({ attempted: 0, fixed: 0, failed: 1, remaining: 0, remainingAutoFixable: 0, remainingManual: 0, note: res.status === 401 ? 'Admin access required' : 'Fix failed' })
         return
       }
       const data = await res.json()
-      setFixResult({ fixed: data.fixed, failed: data.failed, note: data.note })
+      setFixResult({
+        attempted: data.attempted ?? data.fixed + data.failed,
+        fixed: data.fixed ?? 0,
+        failed: data.failed ?? 0,
+        remaining: data.remaining ?? 0,
+        remainingAutoFixable: data.remainingAutoFixable ?? 0,
+        remainingManual: data.remainingManual ?? 0,
+        note: data.note,
+      })
       // Re-scan after fixes
       setTimeout(() => runScan(), 1500)
     } catch {
-      setFixResult({ fixed: 0, failed: 1, note: 'Network error' })
+      setFixResult({ attempted: 0, fixed: 0, failed: 1, remaining: 0, remainingAutoFixable: 0, remainingManual: 0, note: 'Network error' })
     } finally {
       setTimeout(() => setFixing(null), 1500)
     }
@@ -192,6 +208,10 @@ export function SecurityScanCard({ compact = false, autoScan = false }: { compac
 
   if (!result) return null
 
+  const failingChecks = Object.values(result.categories).flatMap((cat) => cat.checks.filter((check) => check.status !== 'pass'))
+  const autoFixableChecks = failingChecks.filter((check) => FIXABLE_IDS.has(check.id))
+  const manualChecks = failingChecks.filter((check) => !FIXABLE_IDS.has(check.id))
+
   return (
     <div className="space-y-4">
       {/* Score header */}
@@ -226,22 +246,21 @@ export function SecurityScanCard({ compact = false, autoScan = false }: { compac
 
       {/* Issue summary + Fix All */}
       {(() => {
-        const totalFailing = Object.values(result.categories).reduce(
-          (sum, cat) => sum + cat.checks.filter(c => c.status !== 'pass').length, 0
-        )
+        const totalFailing = failingChecks.length
         return totalFailing > 0 ? (
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">
-              {totalFailing} issue{totalFailing > 1 ? 's' : ''} found
-            </p>
+            <div className="text-xs text-muted-foreground">
+              <p>{totalFailing} issue{totalFailing > 1 ? 's' : ''} found</p>
+              <p>{autoFixableChecks.length} auto-fixable, {manualChecks.length} manual/review</p>
+            </div>
             <Button
               onClick={() => runFix()}
-              disabled={fixing !== null}
+              disabled={fixing !== null || autoFixableChecks.length === 0}
               variant="outline"
               size="sm"
               className="text-xs border-void-cyan/30 text-void-cyan hover:bg-void-cyan/10"
             >
-              {fixing === 'all' ? 'Fixing...' : 'Fix All Issues'}
+              {fixing === 'all' ? 'Fixing...' : 'Fix Auto-Fixable'}
             </Button>
           </div>
         ) : null
@@ -250,8 +269,11 @@ export function SecurityScanCard({ compact = false, autoScan = false }: { compac
       {/* Fix result feedback */}
       {fixResult && (
         <div className={`text-xs px-3 py-2 rounded-lg border ${fixResult.failed > 0 ? 'bg-amber-500/10 border-amber-500/20 text-amber-300' : 'bg-green-500/10 border-green-500/20 text-green-300'}`}>
+          {fixResult.attempted > 0 && <span>{fixResult.attempted} auto-fix attempt{fixResult.attempted > 1 ? 's' : ''}. </span>}
           {fixResult.fixed > 0 && <span>{fixResult.fixed} issue{fixResult.fixed > 1 ? 's' : ''} fixed. </span>}
           {fixResult.failed > 0 && <span>{fixResult.failed} failed. </span>}
+          {fixResult.remaining > 0 && <span>{fixResult.remaining} issue{fixResult.remaining > 1 ? 's' : ''} remain. </span>}
+          {fixResult.remainingManual > 0 && <span>{fixResult.remainingManual} still need manual action or review. </span>}
           {fixResult.note && <span className="text-muted-foreground">{fixResult.note}</span>}
         </div>
       )}
